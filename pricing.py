@@ -1394,39 +1394,3 @@ class EuropeanVanillaFiniteDiff(FiniteDifference):
                 return self.strike*np.exp(-self.rate*self.tau)
 
 
-
-
-
-
-
-
-
-
-if __name__ == '__main__':
-
-
-
-
-
-
-    maturity = 0.5
-    strike_price = 8.0
-    init_price = 10.0
-    sigma = 0.15
-    rate = 0.03
-    option_type = 'call'
-    model_params = {'sigma':sigma, 'tau':maturity, 'spot_price':init_price, 'rate':rate}
-    
-    n_trials = 100000
-    n_nper_per_year = 360   # 为了简化设置成12*30天，对雪球每月观察敲出，每日观察敲入
-
-
-    pricing_sim = EuropeanVanillaSim(init_price, maturity, n_trials, n_nper_per_year, strike_price, option_type, GeoBrownianMotion, **model_params)
-
-    option_price = pricing_sim.value()
-
-    bs_price = black_scholes(init_price, strike_price, rate, sigma, maturity, option_type)
-    
-
-
-    print(option_price, bs_price)
