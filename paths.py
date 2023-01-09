@@ -49,12 +49,33 @@ class Path(metaclass=abc.ABCMeta):
         plot the simulated paths
         '''
 
+        self.generate_paths()
+
         plt.figure(figsize=(20,10))
 
         for i in range(self.price_paths.shape[0]):
             plt.plot(self.price_paths[i,:])
+
+        plt.title('Sample Paths Plot')
             
         plt.show()
+
+    def plot_hist(self):
+        '''
+        plot the simulated paths histogram
+        '''
+
+        self.generate_paths()
+
+        plt.figure(figsize=(20,10))
+
+        plt.hist(self.price_paths[:,-1], bins=100)
+
+        plt.title('Sample Paths Histogram')
+            
+        plt.show()
+
+
 
 
 class CEV(Path):
@@ -137,7 +158,7 @@ class OU(Path):
 
         try:
             self.spot_price = model_params['spot_price']
-            self.mu = model_params['mu']
+            self.kappa = model_params['kappa']
             self.theta = model_params['theta']
             self.sigma = model_params['sigma']
             self.tau = model_params['tau']
@@ -155,7 +176,7 @@ class OU(Path):
 
         for _ in range(self.n_intervals):
             norm_delta = np.random.randn(self.n_trials, 1)
-            price_vector = price_vector + self.theta*(self.mu-price_vector)*self.delta_time + self.sigma*norm_delta*np.sqrt(self.delta_time)
+            price_vector = price_vector + self.kappa*(self.theta-price_vector)*self.delta_time + self.sigma*norm_delta*np.sqrt(self.delta_time)
             self.price_paths = np.concatenate([self.price_paths, price_vector], axis=1)
 
         self.price_paths = np.delete(self.price_paths, 0, axis=1)
@@ -175,7 +196,7 @@ class CIR(Path):
 
         try:
             self.spot_price = model_params['spot_price']
-            self.mu = model_params['mu']
+            self.kappa = model_params['kappa']
             self.theta = model_params['theta']
             self.sigma = model_params['sigma']
             self.tau = model_params['tau']
@@ -193,7 +214,7 @@ class CIR(Path):
 
         for _ in range(self.n_intervals):
             norm_delta = np.random.randn(self.n_trials, 1)
-            price_vector = price_vector + self.theta*(self.mu-price_vector)*self.delta_time + self.sigma*np.sqrt(price_vector)**norm_delta*np.sqrt(self.delta_time)
+            price_vector = price_vector + self.kappa*(self.theta-price_vector)*self.delta_time + self.sigma*np.sqrt(price_vector)**norm_delta*np.sqrt(self.delta_time)
             self.price_paths = np.concatenate([self.price_paths, price_vector], axis=1)
 
         self.price_paths = np.delete(self.price_paths, 0, axis=1)
@@ -213,7 +234,7 @@ class SABR(Path):
 
         try:
             self.spot_price = model_params['spot_price']
-            self.rate = model_params['rate']
+            #self.rate = model_params['rate']
             self.alpha = model_params['alpha']
             self.beta = model_params['beta']
             self.rho = model_params['rho']
@@ -238,8 +259,8 @@ class SABR(Path):
         for _ in range(self.n_intervals):
 
             norm_delta = np.random.randn(self.n_trials, 2) @ corr_matrix
-            norm_delta1 = norm_delta[:,0]
-            norm_delta2 = norm_delta[:,1]
+            norm_delta1 = norm_delta[:,0].reshape(self.n_trials,1)
+            norm_delta2 = norm_delta[:,1].reshape(self.n_trials,1)
 
             volatility_vector = volatility_vector + self.alpha*volatility_vector*np.sqrt(self.delta_time)*norm_delta1
             price_vector = price_vector + volatility_vector*(price_vector**self.beta)*np.sqrt(self.delta_time)*norm_delta2
@@ -261,7 +282,6 @@ class Heston(Path):
         try:
             self.spot_price = model_params['spot_price']
             self.rate = model_params['rate']
-            self.sigma = model_params['sigma']
             self.tau = model_params['tau']
             self.init_vol = model_params['initialized_volatility']
             self.rho = model_params['rho']
@@ -286,11 +306,12 @@ class Heston(Path):
         for _ in range(self.n_intervals):
 
             norm_delta = np.random.randn(self.n_trials, 2) @ corr_matrix
-            norm_delta1 = norm_delta[:,0]
-            norm_delta2 = norm_delta[:,1]
+            norm_delta1 = norm_delta[:,0].reshape(self.n_trials,1)
+            norm_delta2 = norm_delta[:,1].reshape(self.n_trials,1)
 
             volatility_vector = volatility_vector + self.kappa*(self.theta-np.maximum(volatility_vector,0))*self.delta_time + self.xi*np.sqrt(np.maximum(volatility_vector,0))*np.sqrt(self.delta_time)*norm_delta1
             price_vector = price_vector + self.rate*price_vector*self.delta_time + np.sqrt(np.maximum(volatility_vector,0))*price_vector*np.sqrt(self.delta_time)*norm_delta2
+
             self.price_paths = np.concatenate([self.price_paths, price_vector], axis=1)
 
         return self.price_paths
