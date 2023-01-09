@@ -13,7 +13,6 @@ import numpy as np
 from scipy.stats import norm
 import matplotlib.pyplot as plt
 from matplotlib import cm
-#from mpl_toolkits.mplot3d import Axes3D
 from pricing import *
 import warnings
 warnings.filterwarnings("ignore")
@@ -24,19 +23,26 @@ class BlackScholesGreeks(object):
     compute black scholes greeks
     '''
 
-    def __init__(self, spot_price, strike_price, rate, sigma, maturity, type='call'):
+    def __init__(
+        self, 
+        spot_price, 
+        strike_price, 
+        rate, 
+        sigma, 
+        maturity, 
+        option_type='call'):
         '''
         initialize the parameters of calculating black scholes greeks 
         '''
 
-        assert type in ('call', 'put'), 'The option type must be call or put'
+        assert option_type in ('call', 'put'), 'The option type must be call or put'
 
         self.spot_price = spot_price
         self.strike_price = strike_price
         self.rate = rate
         self.sigma = sigma
         self.tau = maturity
-        self.type = type
+        self.type = option_type
 
         self.__compute_d()
 
@@ -59,12 +65,24 @@ class BlackScholesGreeks(object):
 
             if spot_price != None or maturity != None:
                 if spot_price != None:
+                    original_param1 = self.spot_price
                     self.spot_price = spot_price
                 if maturity != None:
+                    original_param2 = self.tau
                     self.tau = maturity
                 self.__compute_d()
 
-            return func(self, spot_price=None, maturity=None)
+            #res = func(self, spot_price=None, maturity=None)
+            res = func(self, spot_price, maturity)
+
+            if spot_price != None or maturity != None:
+                if spot_price != None:
+                    self.spot_price = original_param1
+                if maturity != None:
+                    self.tau = original_param2
+                self.__compute_d()
+
+            return res
 
         return wrapper
 
@@ -330,6 +348,8 @@ class BlackScholesGreeks(object):
         plt.title('Gamma Surface on Black Scholes Model')
         plt.show()
 
+        return gamma_array
+
  
     def vega_surface(self, moneyness_cut=0.2, interval_t=500, interval_moneyness=500):
         '''
@@ -354,6 +374,8 @@ class BlackScholesGreeks(object):
         ax.set_zlabel('Vega Value')
         plt.title('Vega Surface of {} Option on Black Scholes Model'.format(self.type.upper()))
         plt.show()
+
+        return vega_array
 
 
     def theta_surface(self, moneyness_cut=0.2, interval_t=500, interval_moneyness=500):
@@ -380,6 +402,8 @@ class BlackScholesGreeks(object):
         plt.title('Theta Surface of {} Option on Black Scholes Model'.format(self.type.upper()))
         plt.show()
 
+        return theta_array
+
 
     def rho_surface(self, moneyness_cut=0.2, interval_t=500, interval_moneyness=500):
         '''
@@ -404,6 +428,8 @@ class BlackScholesGreeks(object):
         ax.set_zlabel('Rho Value')
         plt.title('Rho Surface of {} Option on Black Scholes Model'.format(self.type.upper()))
         plt.show()
+
+        return rho_array
 
 
 
@@ -479,7 +505,7 @@ class GreeksSim(object):
         if left_value <= 0.0 or midlle_value <= 0.0 or right_value <= 0.0:
             return 0
         else:
-            return (right_value - 2*midlle_value  + left_value) / (2*(current_price*self.epsilon)**2)
+            return (right_value - 2*midlle_value  + left_value) / (current_price*self.epsilon)**2
 
 
     def vega(self, spot_price=None, tenor=None):
@@ -563,16 +589,16 @@ class GreeksSim(object):
             return (right_value - left_value) / (2*current_rate*self.epsilon)
 
 
-    def plot_delta(self, wrt_spot=True, moneyness_cut=0.2):
+    def plot_delta(self, wrt_spot=True, moneyness_cut=0.2, interval=50):
         '''
         plot delta curve with respect to spot price or maturity numerically
         '''
 
         if wrt_spot:
             try:
-                price_range = np.linspace(self.pricing_obj.strike_price*(1-moneyness_cut), self.pricing_obj.strike_price*(1+moneyness_cut), 500)
+                price_range = np.linspace(self.pricing_obj.strike_price*(1-moneyness_cut), self.pricing_obj.strike_price*(1+moneyness_cut), interval)
             except:
-                price_range = np.linspace(self.pricing_obj.spot_price*(1-moneyness_cut), self.pricing_obj.spot_price*(1+moneyness_cut), 500)
+                price_range = np.linspace(self.pricing_obj.spot_price*(1-moneyness_cut), self.pricing_obj.spot_price*(1+moneyness_cut), interval)
             delta_range = [self.delta(spot_price=price) for price in price_range]
 
             plt.figure(figsize=(20, 10))
@@ -596,16 +622,16 @@ class GreeksSim(object):
             plt.show()
 
 
-    def plot_gamma(self, wrt_spot=True, moneyness_cut=0.2):
+    def plot_gamma(self, wrt_spot=True, moneyness_cut=0.2, interval=50):
         '''
         plot gamma curve with respect to spot price or maturity numerically
         '''
 
         if wrt_spot:
             try:
-                price_range = np.linspace(self.pricing_obj.strike_price*(1-moneyness_cut), self.pricing_obj.strike_price*(1+moneyness_cut), 500)
+                price_range = np.linspace(self.pricing_obj.strike_price*(1-moneyness_cut), self.pricing_obj.strike_price*(1+moneyness_cut), interval)
             except:
-                price_range = np.linspace(self.pricing_obj.spot_price*(1-moneyness_cut), self.pricing_obj.spot_price*(1+moneyness_cut), 500)
+                price_range = np.linspace(self.pricing_obj.spot_price*(1-moneyness_cut), self.pricing_obj.spot_price*(1+moneyness_cut), interval)
             gamma_range = [self.gamma(spot_price=price) for price in price_range]
 
             plt.figure(figsize=(20, 10))
@@ -629,16 +655,16 @@ class GreeksSim(object):
             plt.show()
 
 
-    def plot_vega(self, wrt_spot=True, moneyness_cut=0.2):
+    def plot_vega(self, wrt_spot=True, moneyness_cut=0.2, interval=50):
         '''
         plot vega curve with respect to spot price or maturity numerically
         '''
 
         if wrt_spot:
             try:
-                price_range = np.linspace(self.pricing_obj.strike_price*(1-moneyness_cut), self.pricing_obj.strike_price*(1+moneyness_cut), 500)
+                price_range = np.linspace(self.pricing_obj.strike_price*(1-moneyness_cut), self.pricing_obj.strike_price*(1+moneyness_cut), interval)
             except:
-                price_range = np.linspace(self.pricing_obj.spot_price*(1-moneyness_cut), self.pricing_obj.spot_price*(1+moneyness_cut), 500)
+                price_range = np.linspace(self.pricing_obj.spot_price*(1-moneyness_cut), self.pricing_obj.spot_price*(1+moneyness_cut), interval)
             vega_range = [self.vega(spot_price=price) for price in price_range]
 
             plt.figure(figsize=(20, 10))
@@ -662,16 +688,16 @@ class GreeksSim(object):
             plt.show()
 
 
-    def plot_theta(self, wrt_spot=True, moneyness_cut=0.2):
+    def plot_theta(self, wrt_spot=True, moneyness_cut=0.2, interval=50):
         '''
         plot theta curve with respect to spot price or maturity numerically
         '''
 
         if wrt_spot:
             try:
-                price_range = np.linspace(self.pricing_obj.strike_price*(1-moneyness_cut), self.pricing_obj.strike_price*(1+moneyness_cut), 500)
+                price_range = np.linspace(self.pricing_obj.strike_price*(1-moneyness_cut), self.pricing_obj.strike_price*(1+moneyness_cut), interval)
             except:
-                price_range = np.linspace(self.pricing_obj.spot_price*(1-moneyness_cut), self.pricing_obj.spot_price*(1+moneyness_cut), 500)
+                price_range = np.linspace(self.pricing_obj.spot_price*(1-moneyness_cut), self.pricing_obj.spot_price*(1+moneyness_cut), interval)
             theta_range = [self.theta(spot_price=price) for price in price_range]
 
             plt.figure(figsize=(20, 10))
@@ -695,16 +721,16 @@ class GreeksSim(object):
             plt.show()
 
 
-    def plot_rho(self, wrt_spot=True, moneyness_cut=0.2):
+    def plot_rho(self, wrt_spot=True, moneyness_cut=0.2, interval=50):
         '''
         plot rho curve with respect to spot price or maturity numerically
         '''
 
         if wrt_spot:
             try:
-                price_range = np.linspace(self.pricing_obj.strike_price*(1-moneyness_cut), self.pricing_obj.strike_price*(1+moneyness_cut), 500)
+                price_range = np.linspace(self.pricing_obj.strike_price*(1-moneyness_cut), self.pricing_obj.strike_price*(1+moneyness_cut), interval)
             except:
-                price_range = np.linspace(self.pricing_obj.spot_price*(1-moneyness_cut), self.pricing_obj.spot_price*(1+moneyness_cut), 500)
+                price_range = np.linspace(self.pricing_obj.spot_price*(1-moneyness_cut), self.pricing_obj.spot_price*(1+moneyness_cut), interval)
             rho_range = [self.rho(spot_price=price) for price in price_range]
 
             plt.figure(figsize=(20, 10))
@@ -905,33 +931,3 @@ class GreeksSim(object):
 
         return rho_array
 
-
-
-
-if __name__ == '__main__':
-
-    '''
-    maturity = 0.5
-    strike_price = 8.0
-    init_price = 8.0
-    sigma = 0.15
-    rate = 0.03
-    model_params = {'sigma':sigma, 'tau':maturity, 'spot_price':init_price, 'rate':rate}
-    
-    n_trials = 100000
-    n_nper_per_year = 365
-    epsilon = 0.1
-
-
-    bsg_obj = BlackScholesGreeks(init_price, strike_price, rate, sigma, maturity)
-    #bsg_obj.plot_vega(moneyness_cut=0.3)
-    delta_array_bs = bsg_obj.rho_surface()
-
-
-    # print('bs', delta_array_bs)
-
-
-
-    '''
-
-    pass
