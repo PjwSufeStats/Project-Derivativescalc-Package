@@ -179,6 +179,8 @@ class BlackScholesGreeks(object):
             plt.plot(time_range, delta_range)
             plt.show()
 
+        return delta_range
+
 
     def plot_gamma(self, wrt_spot=True, moneyness_cut=0.2):
         '''
@@ -207,6 +209,8 @@ class BlackScholesGreeks(object):
             plt.grid()
             plt.plot(time_range, gamma_range)
             plt.show()
+
+        return gamma_range
 
 
     def plot_vega(self, wrt_spot=True, moneyness_cut=0.2):
@@ -237,6 +241,8 @@ class BlackScholesGreeks(object):
             plt.plot(time_range, vega_range)
             plt.show() 
 
+        return vega_range
+
 
     def plot_theta(self, wrt_spot=True, moneyness_cut=0.2):
         '''
@@ -266,6 +272,8 @@ class BlackScholesGreeks(object):
             plt.plot(time_range, theta_range)
             plt.show()  
 
+        return theta_range
+
 
     def plot_rho(self, wrt_spot=True, moneyness_cut=0.2):
         '''
@@ -294,6 +302,8 @@ class BlackScholesGreeks(object):
             plt.grid()
             plt.plot(time_range, rho_range)
             plt.show()  
+
+        return rho_range
 
 
     def delta_surface(self, moneyness_cut=0.2, interval_t=500, interval_moneyness=500):
@@ -620,6 +630,8 @@ class GreeksSim(object):
             plt.plot(time_range, delta_range)
             plt.show()
 
+        return delta_range
+
 
     def plot_gamma(self, wrt_spot=True, moneyness_cut=0.2, interval=50):
         '''
@@ -652,6 +664,8 @@ class GreeksSim(object):
             plt.grid()
             plt.plot(time_range, gamma_range)
             plt.show()
+
+        return gamma_range
 
 
     def plot_vega(self, wrt_spot=True, moneyness_cut=0.2, interval=50):
@@ -686,6 +700,8 @@ class GreeksSim(object):
             plt.plot(time_range, vega_range)
             plt.show()
 
+        return vega_range
+
 
     def plot_theta(self, wrt_spot=True, moneyness_cut=0.2, interval=50):
         '''
@@ -719,6 +735,8 @@ class GreeksSim(object):
             plt.plot(time_range, theta_range)
             plt.show()
 
+        return theta_range
+
 
     def plot_rho(self, wrt_spot=True, moneyness_cut=0.2, interval=50):
         '''
@@ -751,6 +769,8 @@ class GreeksSim(object):
             plt.grid()
             plt.plot(time_range, rho_range)
             plt.show()
+
+        return rho_range
 
 
     def delta_surface(self, moneyness_cut=0.2, interval_t=50, interval_moneyness=50):
