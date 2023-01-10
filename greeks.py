@@ -72,7 +72,6 @@ class BlackScholesGreeks(object):
                     self.tau = maturity
                 self.__compute_d()
 
-            #res = func(self, spot_price=None, maturity=None)
             res = func(self, spot_price, maturity)
 
             if spot_price != None or maturity != None:
@@ -442,7 +441,7 @@ class GreeksSim(object):
 
     def __init__(self, pricing_obj, epsilon=0.01):
         '''
-        
+        initialize the parameters
         '''
 
         self.pricing_obj = pricing_obj
@@ -596,7 +595,7 @@ class GreeksSim(object):
 
         if wrt_spot:
             try:
-                price_range = np.linspace(self.pricing_obj.strike_price*(1-moneyness_cut), self.pricing_obj.strike_price*(1+moneyness_cut), interval)
+                price_range = np.linspace(self.pricing_obj.strike*(1-moneyness_cut), self.pricing_obj.strike*(1+moneyness_cut), interval)
             except:
                 price_range = np.linspace(self.pricing_obj.spot_price*(1-moneyness_cut), self.pricing_obj.spot_price*(1+moneyness_cut), interval)
             delta_range = [self.delta(spot_price=price) for price in price_range]
@@ -629,7 +628,7 @@ class GreeksSim(object):
 
         if wrt_spot:
             try:
-                price_range = np.linspace(self.pricing_obj.strike_price*(1-moneyness_cut), self.pricing_obj.strike_price*(1+moneyness_cut), interval)
+                price_range = np.linspace(self.pricing_obj.strike*(1-moneyness_cut), self.pricing_obj.strike*(1+moneyness_cut), interval)
             except:
                 price_range = np.linspace(self.pricing_obj.spot_price*(1-moneyness_cut), self.pricing_obj.spot_price*(1+moneyness_cut), interval)
             gamma_range = [self.gamma(spot_price=price) for price in price_range]
@@ -662,7 +661,7 @@ class GreeksSim(object):
 
         if wrt_spot:
             try:
-                price_range = np.linspace(self.pricing_obj.strike_price*(1-moneyness_cut), self.pricing_obj.strike_price*(1+moneyness_cut), interval)
+                price_range = np.linspace(self.pricing_obj.strike*(1-moneyness_cut), self.pricing_obj.strike*(1+moneyness_cut), interval)
             except:
                 price_range = np.linspace(self.pricing_obj.spot_price*(1-moneyness_cut), self.pricing_obj.spot_price*(1+moneyness_cut), interval)
             vega_range = [self.vega(spot_price=price) for price in price_range]
@@ -695,7 +694,7 @@ class GreeksSim(object):
 
         if wrt_spot:
             try:
-                price_range = np.linspace(self.pricing_obj.strike_price*(1-moneyness_cut), self.pricing_obj.strike_price*(1+moneyness_cut), interval)
+                price_range = np.linspace(self.pricing_obj.strike*(1-moneyness_cut), self.pricing_obj.strike*(1+moneyness_cut), interval)
             except:
                 price_range = np.linspace(self.pricing_obj.spot_price*(1-moneyness_cut), self.pricing_obj.spot_price*(1+moneyness_cut), interval)
             theta_range = [self.theta(spot_price=price) for price in price_range]
@@ -728,7 +727,7 @@ class GreeksSim(object):
 
         if wrt_spot:
             try:
-                price_range = np.linspace(self.pricing_obj.strike_price*(1-moneyness_cut), self.pricing_obj.strike_price*(1+moneyness_cut), interval)
+                price_range = np.linspace(self.pricing_obj.strike*(1-moneyness_cut), self.pricing_obj.strike*(1+moneyness_cut), interval)
             except:
                 price_range = np.linspace(self.pricing_obj.spot_price*(1-moneyness_cut), self.pricing_obj.spot_price*(1+moneyness_cut), interval)
             rho_range = [self.rho(spot_price=price) for price in price_range]
