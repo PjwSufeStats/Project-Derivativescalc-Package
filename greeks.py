@@ -354,7 +354,7 @@ class BlackScholesGreeks(object):
         ax.set_ylabel('Maturity')
         ax.set_xlabel('Log Moneyness')
         ax.set_zlabel('Gamma Value')
-        plt.title('Gamma Surface on Black Scholes Model')
+        plt.title('Gamma Surface of {} Option on Black Scholes Model'.format(self.type.upper()))
         plt.show()
 
         return gamma_array
@@ -770,7 +770,7 @@ class GreeksSim(object):
             plt.plot(time_range, rho_range)
             plt.show()
 
-        return rho_range
+        return 
 
 
     def delta_surface(self, moneyness_cut=0.2, interval_t=50, interval_moneyness=50):

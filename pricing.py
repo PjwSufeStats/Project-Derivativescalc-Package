@@ -13,7 +13,15 @@ OTC derivatives such as snow ball product.
 import abc
 from scipy.stats import norm
 from paths import * 
+import warnings
+warnings.filterwarnings("ignore")
 
+from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet, LassoLars
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.svm import SVR 
+from sklearn.neural_network import MLPRegressor
+from sklearn.tree import DecisionTreeRegressor, ExtraTreeRegressor
+from sklearn.ensemble import RandomForestRegressor, AdaBoostRegressor, GradientBoostingRegressor, BaggingRegressor
 
 def forward(
     spot_price,
@@ -215,7 +223,8 @@ class MonteCarloSim(Price):
             OU, 
             CIR, 
             SABR, 
-            Heston]
+            Heston,
+            Merton]
         assert model in model_types_list, 'Selcet an available model type'
 
         self.n_trials = n_trials
@@ -291,7 +300,7 @@ class MonteCarloSim(Price):
             self.spot_price = new_value
         elif param == 'tau':
             self.tau = new_value
-            self.n_intervals = self.nper_per_year * self.tau
+            self.n_intervals = int(self.nper_per_year * self.tau)
         elif param == 'sigma' or param == 'initialized_volatility':
             try:
                 self.sigma = new_value
@@ -559,6 +568,7 @@ class EuropeanAsianSim(MonteCarloSim):
         strike,
         option_type='call',
         ave_type='arith', 
+        #observe_days=None,
         model=GeoBrownianMotion, 
         **model_params):
         '''
@@ -574,6 +584,7 @@ class EuropeanAsianSim(MonteCarloSim):
         self.strike = strike
         self.option_type = option_type
         self.ave_type = ave_type
+        #self.observe_days = observe_days
 
 
     @MonteCarloSim.generate_paths
@@ -662,6 +673,8 @@ class SnowBallSim(MonteCarloSim):
         fixed_yield,
         ki_level,
         ko_level,
+        # low_strike=0,
+        # high_strike=1,
         step_down=0,
         ki_fre='day',
         ko_fre='month',
@@ -796,8 +809,6 @@ class FCNSim(SnowBallSim):
         fixed_yield,
         ki_level,
         ko_level,
-        # low_strike=0,
-        # high_strike=1,
         step_down=0,
         ko_fre='month',
         sd_fre='month',
@@ -967,9 +978,9 @@ class BoosterSim(SnowBallSim):
 
 
 
-class BinominalTree(Price):
+class BinomialTree(Price):
     '''
-    binominal tree pricing model base class
+    binomial tree pricing model base class
     '''
 
     def __init__(
@@ -1008,7 +1019,7 @@ class BinominalTree(Price):
 
         return None
 
-    def path_judgement(self, spot_price):
+    def path_judgement(self, spot_price, derivative_value):
         '''
         judge the termination conditions in advance
         '''
@@ -1017,15 +1028,19 @@ class BinominalTree(Price):
 
     def recursion(self, n_iter, spot_price):
         '''
-        binominal tree recursion algorithm
+        binomial tree recursion algorithm
         '''
 
-        path_return = self.path_judgement(spot_price)
-        if path_return != None:
-            return path_return
-
         if n_iter > 1:
-            return np.exp(-(self.rate-self.dividend)*self.delta_time) * (self.p_tilde*self.recursion(n_iter-1, self.u*spot_price) + self.q_tilde*self.recursion(n_iter-1, self.d*spot_price))
+
+            derivative_value = np.exp(-(self.rate-self.dividend)*self.delta_time) * (self.p_tilde*self.recursion(n_iter-1, self.u*spot_price) + self.q_tilde*self.recursion(n_iter-1, self.d*spot_price))
+            updated_value = self.path_judgement(spot_price, derivative_value)
+
+            if updated_value != None:
+                return updated_value
+            else:
+                return derivative_value
+
         else:
             return self.payoff(spot_price)
 
@@ -1040,9 +1055,9 @@ class BinominalTree(Price):
 
 
 
-class EuropeanVanillaBinominal(BinominalTree):
+class EuropeanVanillaBinomial(BinomialTree):
     '''
-    binominal tree pricing for european vanilla options
+    binomial tree pricing for european vanilla options
     '''
 
     def __init__(
@@ -1080,7 +1095,7 @@ class EuropeanVanillaBinominal(BinominalTree):
 
 
 
-class EuropeanAsianBinominal(BinominalTree):
+class EuropeanAsianBinomial(BinomialTree):
     '''
     binominal tree pricing for european asian options
     '''
@@ -1127,12 +1142,8 @@ class EuropeanAsianBinominal(BinominalTree):
 
     def recursion(self, n_iter, spot_price, on_path_sum=0):
         '''
-        recursion algorithm for binominal tree pricing model
+        recursion algorithm for binomial tree pricing model
         '''
-
-        path_return = self.path_judgement(spot_price)
-        if path_return != None:
-            return path_return
 
         if self.ave_type == 'arith':
             on_path_sum += spot_price
@@ -1140,16 +1151,24 @@ class EuropeanAsianBinominal(BinominalTree):
             on_path_sum *= spot_price
         
         if n_iter > 1:
-            return np.exp(-(self.rate-self.dividend)*self.delta_time) * (self.p_tilde*self.recursion(n_iter-1, self.u*spot_price, on_path_sum) + self.q_tilde*self.recursion(n_iter-1, self.d*spot_price, on_path_sum))
+
+            derivative_value = np.exp(-(self.rate-self.dividend)*self.delta_time) * (self.p_tilde*self.recursion(n_iter-1, self.u*spot_price, on_path_sum) + self.q_tilde*self.recursion(n_iter-1, self.d*spot_price, on_path_sum))
+            updated_value = self.path_judgement(spot_price, derivative_value)
+
+            if updated_value != None:
+                return updated_value
+            else:
+                return derivative_value
+        
         else:
             return self.payoff(on_path_sum)
 
 
 
 
-class AmericanVanillaBinominal(BinominalTree):
+class AmericanVanillaBinomial(BinomialTree):
     '''
-    binominal tree pricing for american vanilla options
+    binomial tree pricing for american vanilla options
     '''
 
     def __init__(
@@ -1172,6 +1191,7 @@ class AmericanVanillaBinominal(BinominalTree):
         self.strike = strike
         self.option_type = option_type
 
+
     def payoff(self, spot_price):
         '''
         define the terminal payoff for a certain derivative
@@ -1182,14 +1202,15 @@ class AmericanVanillaBinominal(BinominalTree):
         elif self.option_type == 'put':
             return self.strike - spot_price if spot_price - self.strike < 0 else 0
 
-    def path_judgement(self, spot_price):
+
+    def path_judgement(self, spot_price, derivative_value):
         '''
         judge the termination conditions in advance
         '''
 
-        if self.option_type == 'call' and spot_price - self.strike > 0:
+        if self.option_type == 'call' and spot_price - self.strike > derivative_value:
             return spot_price - self.strike
-        elif self.option_type == 'put' and spot_price - self.strike < 0:
+        elif self.option_type == 'put' and self.strike - spot_price > derivative_value:
             return self.strike - spot_price
         else:
             return None
@@ -1374,4 +1395,265 @@ class EuropeanVanillaFiniteDiff(FiniteDifference):
                 return 0
             elif boundary_type == 'low':
                 return self.strike*np.exp(-self.rate*(self.tau-time_i*self.delta_time))
+
+
+
+
+
+
+class LeastSquaredMonteCarloSim(MonteCarloSim):
+    '''
+    least squared monte carlo simulation base class
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        n_trials, 
+        nper_per_year, 
+        regression_model,
+        fetures_order,
+        model, 
+        **model_params):
+        '''
+        intiaialize the structure parameters
+        '''
+
+        super().__init__(init_price, maturity, n_trials, nper_per_year, model, **model_params)
+
+        try:
+            self.model_params['rate']
+        except:
+            raise ValueError('Longstaff-Schwarz method requires a discounted rate')
+
+        regression_model_list = [
+            LinearRegression,
+            Ridge,
+            Lasso,
+            ElasticNet,
+            KNeighborsRegressor,
+            SVR,
+            MLPRegressor,
+            DecisionTreeRegressor,
+            ExtraTreeRegressor,
+            RandomForestRegressor,
+            AdaBoostRegressor,
+            GradientBoostingRegressor,
+            BaggingRegressor]
+        assert regression_model in regression_model_list, 'Please select an available regression model'
+        assert isinstance(fetures_order, int) and fetures_order >= 1, 'Number of fetures must be integer and no less than 1'
+
+        self.regression_model = regression_model
+        self.fetures_order = fetures_order
+        self.delta_time = 1 / nper_per_year
+
+
+    def generate_paths(func):
+        '''
+        paths generate decorator, the overwritten value method must be decorated by this decorator
+        in order to generate paths again when the parameters may be changed
+        '''
+
+        def wrapper(self):
+
+            path = self.model(self.n_trials, self.n_intervals, **self.model_params)
+            self.price_process = path.generate_paths()
+
+            return func(self)
+
+        return wrapper
+
+
+    @abc.abstractmethod
+    def payoff(self, time_i=None):
+        '''
+        define the exercise payoff for a certain derivative
+        '''
+
+        return None
+
+    @abc.abstractmethod
+    def itm_path_index(self, time_i):
+        '''
+        filter the in the money paths
+        '''
+
+        return None
+
+
+    @generate_paths
+    def value(self):
+        '''
+        valuation of the derivative
+        '''
+
+        self.exercise_matrix = np.where(self.payoff(-1) > 0, 1,0).reshape(self.n_trials, 1)
+
+        for i in range(self.n_intervals-1):
+
+            itm_index = self.itm_path_index(-i-2)
+            if len(itm_index) < 1:
+                self.exercise_matrix = np.concatenate([np.array([0]*self.n_trials).reshape(len(exercise_vector),1), self.exercise_matrix], axis=1)
+                continue
+
+            itm_paths = self.price_process[itm_index].reshape(len(itm_index), self.n_intervals)
+            dis_cash_flow = np.exp(-self.rate*self.delta_time)*(self.payoff(-i-1)[np.array(itm_index)])           
+
+            reg_X = np.ones((len(itm_index), 1))
+            for j in range(self.fetures_order):
+                reg_X = np.concatenate([reg_X, np.array([[x_value**(j+1) for x_value in itm_paths[:,-i-2]]]).T], axis=1)
+
+            regressor = self.regression_model().fit(reg_X, dis_cash_flow)
+            reg_result = regressor.predict(reg_X)
+
+            exercise_vector = np.array([0]*self.n_trials) 
+            np.put(exercise_vector, itm_index, np.where(self.payoff(-i-2)[np.array(itm_index)] > reg_result, 1,0))
+            self.exercise_matrix = np.concatenate([np.array(exercise_vector).reshape(len(exercise_vector),1), self.exercise_matrix], axis=1)
+
+        exercise_index = np.squeeze(np.argmax(self.exercise_matrix, axis=1))
+        exercise_indicator = np.max(self.exercise_matrix, axis=1)
+        exercise_payoff = self.payoff()[range(self.n_trials), exercise_index] * exercise_indicator
+
+        expire_maturity = ((exercise_index + 1) * exercise_indicator) / self.nper_per_year
+        discount_func = np.frompyfunc(lambda x:np.exp(-self.rate*x),1,1)
+
+        simulated_price = np.mean(discount_func(expire_maturity) * exercise_payoff)
+
+        return simulated_price
+
+
+
+
+
+class AmericanVanillaLSMC(LeastSquaredMonteCarloSim):
+    '''
+    least squared monte carlo simulation for american vanilla options
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        n_trials, 
+        nper_per_year,
+        strike,
+        option_type='put', 
+        regression_model=LinearRegression,
+        fetures_order=2,
+        model=GeoBrownianMotion,
+        **model_params):
+        '''
+        intiaialize the structure parameters
+        '''
+
+        assert option_type.lower() in ('call', 'put'), 'The option type must be call or put'
+
+        super().__init__(init_price, maturity, n_trials, nper_per_year, regression_model, fetures_order, model, **model_params)
+
+        self.rate = model_params['rate']
+        self.strike = strike
+        self.option_type = option_type
+
+        
+    def payoff(self, time_i=None):
+        '''
+        define the exercise payoff for a certain derivative
+        '''
+
+        if self.option_type == 'call':
+            relu_func = np.frompyfunc(lambda x:x-self.strike if x-self.strike >= 0 else 0,1,1)
+        elif self.option_type == 'put':
+            relu_func = np.frompyfunc(lambda x:self.strike-x if self.strike-x >= 0 else 0,1,1)
+
+        if time_i != None:
+            return relu_func(self.price_process[:,time_i])
+        else:
+            return relu_func(self.price_process)
+
+
+    def itm_path_index(self, time_i):
+        '''
+        filter the in the money paths
+        '''
+
+        if self.option_type == 'call':
+            return np.argwhere(self.price_process[:,time_i] > self.strike)
+        elif self.option_type == 'put':
+            return np.argwhere(self.price_process[:,time_i] < self.strike)
+
+
+
+
+
+class AmericanAsianLSMC(LeastSquaredMonteCarloSim):
+    '''
+    least squared monte carlo simulation for american asian options
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        n_trials, 
+        nper_per_year,
+        strike,
+        option_type='put',
+        ave_type='arith',
+        regression_model=LinearRegression,
+        fetures_order=2,
+        model=GeoBrownianMotion,
+        **model_params):
+        '''
+        intiaialize the structure parameters
+        '''
+
+        assert option_type.lower() in ('call', 'put'), 'The option type must be call or put'
+        assert ave_type.lower() in ('arith', 'geo'), 'The average type must be arithmetic or geometric'
+
+        super().__init__(init_price, maturity, n_trials, nper_per_year, regression_model, fetures_order, model, **model_params)
+
+        self.rate = model_params['rate']
+        self.strike = strike
+        self.option_type = option_type
+        self.ave_type = ave_type
+
+    
+    def payoff(self, time_i=None):
+        '''
+        define the exercise payoff for a certain derivative
+        '''
+
+        if self.option_type == 'call':
+            relu_func = np.frompyfunc(lambda x:x-self.strike if x-self.strike >= 0 else 0,1,1)
+        elif self.option_type == 'put':
+            relu_func = np.frompyfunc(lambda x:self.strike-x if self.strike-x >= 0 else 0,1,1)
+
+        if time_i != None:
+            if self.ave_type == 'arith':
+                return relu_func(np.mean(self.price_process[:,:time_i], axis=1))
+            elif self.ave_type == 'geo':
+                return relu_func(np.exp(np.mean(np.log(self.price_process[:,:time_i]), axis=1)))
+        else:
+            if self.ave_type == 'arith':
+                return relu_func(np.cumsum(self.price_process, axis=1)/np.array([[i+1 for i in range(self.n_intervals)]]*self.n_trials))
+            elif self.ave_type == 'geo':
+                return relu_func(np.exp(np.cumsum(np.log(self.price_process), axis=1)/np.array([[i+1 for i in range(self.n_intervals)]]*self.n_trials)))
+
+
+    def itm_path_index(self, time_i):
+        '''
+        filter the in the money paths
+        '''
+
+        if self.option_type == 'call':
+            if self.ave_type == 'arith':
+                return np.argwhere(np.mean(self.price_process[:,:time_i], axis=1) > self.strike)
+            elif self.ave_type == 'geo':
+                return np.argwhere(np.exp(np.mean(np.log(self.price_process[:,:time_i]), axis=1)) > self.strike)
+        elif self.option_type == 'put':
+            if self.ave_type == 'arith':
+                return np.argwhere(np.mean(self.price_process[:,:time_i], axis=1) < self.strike)
+            elif self.ave_type == 'geo':
+                return np.argwhere(np.exp(np.mean(np.log(self.price_process[:,:time_i]), axis=1)) < self.strike)   
 
