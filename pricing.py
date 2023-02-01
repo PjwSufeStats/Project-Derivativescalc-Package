@@ -6,7 +6,7 @@ E-Mail : junwen.peng@163.sufe.edu.cn / jwpeng22@bu.edu
 Introduction : This file covers the fundamental pricing approaches for different derivatives structures,
 The monte carlo simulation approach, binominal trees approach and finite difference approach has been
 introduced into pricing. The monte carlo approach allows user to select different underlying dynamics
-in paths.py to generate paths. Futhermore, this file also contains the pricing approaches for some popupar 
+in paths.py to generate paths. Futhermore, this file also contains the pricing approaches for some popular 
 OTC derivatives such as snow ball product.
 '''
 
