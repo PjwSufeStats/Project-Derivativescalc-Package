@@ -10,7 +10,6 @@ monte carlo simulation approach.
 '''
 
 import abc
-import time
 import numpy as np
 import numpy.linalg as la
 import matplotlib.pyplot as plt
@@ -340,7 +339,7 @@ class Merton(Path):
 
         super().__init__(n_trials, n_intervals, self.tau)
 
-        self.kj = np.exp(self.mu + 0.5*self.sigma**2)
+        self.kj = np.exp(self.mu + 0.5*self.delta**2)
 
 
     def generate_paths(self):
@@ -365,4 +364,69 @@ class Merton(Path):
         self.price_paths = np.delete(self.price_paths, 0, axis=1)
 
         return self.price_paths
+
+
+
+class Bates(Path):
+    '''
+    generate simulated sample paths based on Bates' Stochastic Volatility Jump model
+    '''
+
+    def __init__(self, n_trials, n_intervals, **model_params):
+        '''
+        intiaialize the model parameters
+        '''
+
+        try:
+            self.spot_price = model_params['spot_price']
+            self.rate = model_params['rate']
+            self.lambda_ = model_params['lambda']
+            self.mu = model_params['mu']
+            self.delta = model_params['delta']
+            self.init_vol = model_params['initialized_volatility']
+            self.rho = model_params['rho']
+            self.kappa = model_params['xi']
+            self.xi = model_params['kappa']
+            self.theta = model_params['theta']
+            self.tau = model_params['tau']
+        except:
+            raise ValueError('Parameters input are not correct')
+
+        super().__init__(n_trials, n_intervals, self.tau)
+
+        self.kj = np.exp(self.mu + 0.5*self.delta**2)
+
+
+    def generate_paths(self):
+        '''
+        return N * M array, N is the number of paths, M is the number of sampling intervals 
+        '''
+
+        self.price_paths = price_vector = self.spot_price * np.ones((self.n_trials, 1))
+        volatility_vector = self.init_vol * np.ones((self.n_trials,1))
+
+        corr_matrix = la.cholesky(np.array([[1,self.rho],[self.rho,1]]))
+
+        for _ in range(self.n_intervals):
+
+            norm_delta = np.random.randn(self.n_trials, 2) @ corr_matrix
+            norm_delta1 = norm_delta[:,0].reshape(self.n_trials,1)
+            norm_delta2 = norm_delta[:,1].reshape(self.n_trials,1)
+            norm_delta3 = np.random.randn(self.n_trials, 1)
+            poisson_delta = np.random.poisson(self.lambda_*self.delta_time, self.n_trials).reshape(self.n_trials, 1)
+            jump_t = np.exp(self.mu + self.delta*norm_delta3)
+
+            volatility_vector = volatility_vector + self.kappa*(self.theta-np.maximum(volatility_vector,0))*self.delta_time + self.xi*np.sqrt(np.maximum(volatility_vector,0))*np.sqrt(self.delta_time)*norm_delta1
+            price_vector = (price_vector + price_vector*(self.rate-self.lambda_*self.kj)*self.delta_time + np.sqrt(np.maximum(volatility_vector,0))*price_vector*norm_delta2*np.sqrt(self.delta_time) + 
+                            (jump_t-1)*price_vector*poisson_delta)
+
+            price_vector = np.maximum(price_vector, 0)
+            self.price_paths = np.concatenate([self.price_paths, price_vector], axis=1)
+
+        self.price_paths = np.delete(self.price_paths, 0, axis=1)
+
+        return self.price_paths
+
+
+
 
