@@ -23,6 +23,10 @@ from sklearn.neural_network import MLPRegressor
 from sklearn.tree import DecisionTreeRegressor, ExtraTreeRegressor
 from sklearn.ensemble import RandomForestRegressor, AdaBoostRegressor, GradientBoostingRegressor, BaggingRegressor
 
+
+
+
+
 def forward(
     spot_price,
     rate,
@@ -87,7 +91,7 @@ def knock_out_barrier_analytical(
     I1 = norm.cdf(delta_func(True, maturity, spot_price/strike_price)) - norm.cdf(delta_func(True, maturity, spot_price/barrier))
     I2 = np.exp(rate*maturity) * (norm.cdf(delta_func(False, maturity, spot_price/strike_price)) - norm.cdf(delta_func(False, maturity, spot_price/barrier)))
     I3 = (spot_price/barrier)**(-(2*rate/sigma**2)-1) * (norm.cdf(delta_func(True, maturity, barrier**2/(strike_price*spot_price))) - norm.cdf(delta_func(True, maturity, barrier/spot_price)))
-    I4 = np.exp(-rate*maturity) * (spot_price/barrier)**(-(2*rate/sigma**2)-1) * (norm.cdf(delta_func(False, maturity, barrier**2/(strike_price*spot_price))) - norm.cdf(delta_func(False, maturity, barrier/spot_price)))
+    I4 = np.exp(-rate*maturity) * (spot_price/barrier)**(-(2*rate/sigma**2)+1) * (norm.cdf(delta_func(False, maturity, barrier**2/(strike_price*spot_price))) - norm.cdf(delta_func(False, maturity, barrier/spot_price)))
 
     call_price = spot_price*I1 - strike_price*I2 - spot_price*I3 + strike_price*I4
 
@@ -224,7 +228,8 @@ class MonteCarloSim(Price):
             CIR, 
             SABR, 
             Heston,
-            Merton]
+            Merton,
+            Bates]
         assert model in model_types_list, 'Selcet an available model type'
 
         self.n_trials = n_trials
@@ -371,7 +376,8 @@ class EuropeanVanillaSim(MonteCarloSim):
     monte carlo simulation for european vanilla options
     '''
 
-    def __init__(self, 
+    def __init__(
+        self, 
         init_price, 
         maturity, 
         n_trials, 
@@ -416,10 +422,10 @@ class EuropeanBarrierSim(MonteCarloSim):
     '''
 
     def __init__(
-        self, 
+        self,
         init_price, 
         maturity, 
-        n_trials, 
+        n_trials,
         nper_per_year, 
         strike, 
         barrier_up=None, 
@@ -449,8 +455,8 @@ class EuropeanBarrierSim(MonteCarloSim):
         self.option_type = option_type
         self.knock_type = knock_type
         self.direction = direction
-        self.barrier_up = init_price* barrier_up
-        self.barrier_down = init_price* barrier_down
+        self.barrier_up = init_price*barrier_up
+        self.barrier_down = init_price*barrier_down
 
 
     @MonteCarloSim.generate_paths
@@ -475,7 +481,7 @@ class EuropeanBarrierSim(MonteCarloSim):
             if self.knock_type == 'out':
                 indicator_matrix = np.array(np.max(self.price_process,axis=1) < self.barrier_up, dtype=int) * np.array(np.min(self.price_process,axis=1) > self.barrier_down, dtype=int)
             elif self.knock_type == 'in':
-                indicator_matrix = np.array(np.max(self.price_process,axis=1) >= self.barrier_up, dtype=int) * np.array(np.min(self.price_process,axis=1) <= self.barrier_down, dtype=int)
+                indicator_matrix = 1-((1-np.array(np.max(self.price_process,axis=1) >= self.barrier_up, dtype=int)) * (1-np.array(np.min(self.price_process,axis=1) <= self.barrier_down, dtype=int)))
 
         if self.option_type == 'call':
             relu_func = np.frompyfunc(lambda x:x-self.strike if x-self.strike >= 0 else 0,1,1)
@@ -501,11 +507,11 @@ class EuropeanLookbackSim(MonteCarloSim):
         init_price, 
         maturity, 
         n_trials, 
-        nper_per_year, 
+        nper_per_year,
         fixed_strike=False, 
-        strike=None, 
+        strike=None,
         option_type='call', 
-        model=GeoBrownianMotion, 
+        model=GeoBrownianMotion,
         **model_params):
         '''
         intiaialize the model parameters
@@ -568,7 +574,6 @@ class EuropeanAsianSim(MonteCarloSim):
         strike,
         option_type='call',
         ave_type='arith', 
-        #observe_days=None,
         model=GeoBrownianMotion, 
         **model_params):
         '''
@@ -584,7 +589,6 @@ class EuropeanAsianSim(MonteCarloSim):
         self.strike = strike
         self.option_type = option_type
         self.ave_type = ave_type
-        #self.observe_days = observe_days
 
 
     @MonteCarloSim.generate_paths
@@ -658,6 +662,149 @@ class EuropeanBinarySim(MonteCarloSim):
 
 
 
+class ChooserSim(MonteCarloSim):
+    '''
+    monte carlo simulation for chooser options
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        n_trials, 
+        nper_per_year, 
+        strike, 
+        choose_time,
+        model=GeoBrownianMotion, 
+        **model_params):
+        '''
+        intiaialize the structure parameters
+        '''
+
+        super().__init__(init_price, maturity, n_trials, nper_per_year, model, **model_params)
+
+        assert 0 < choose_time < 1, 'The choose time must be between 0 and 1'
+
+        self.strike = strike
+        self.choose_time = choose_time
+        self.choose_index = int(choose_time*self.n_intervals)
+
+
+    @MonteCarloSim.generate_paths
+    def value(self):
+        '''
+        valuation of the derivative
+        '''
+
+        relu_call_func = np.frompyfunc(lambda x:x-self.strike if x-self.strike >= 0 else 0,1,1)
+        relu_put_func = np.frompyfunc(lambda x:self.strike-x if self.strike-x >= 0 else 0,1,1)
+
+        self.payoff_vector = np.exp(-self.rate*self.tau)*relu_call_func(self.price_process[:,-1]) + np.exp(-self.rate*self.choose_time*self.tau)*relu_put_func(self.price_process[:,self.choose_index])
+        simulated_price = np.mean(self.payoff_vector)
+
+        return simulated_price
+
+
+
+
+
+class EuropeanParisianSim(EuropeanBarrierSim):
+    '''
+    monte carlo simulation for european parisian options
+    '''
+
+    def __init__(
+        self,
+        init_price,
+        maturity, 
+        n_trials, 
+        nper_per_year,
+        strike,
+        observ_window,
+        barrier_up=None, 
+        barrier_down=None,
+        option_type='call', 
+        knock_type='out', 
+        direction='up', 
+        observ_type='continous',
+        model=GeoBrownianMotion, 
+        **model_params):
+        '''
+        intiaialize the structure parameters
+        '''
+
+        assert observ_type in ('continous', 'accum'), 'The observation type must be continous or accum'
+
+        super().__init__(init_price, maturity, n_trials, nper_per_year, strike, barrier_up, barrier_down, option_type, knock_type, direction, model, **model_params)
+
+        self.observ_window = observ_window
+        self.observ_type = observ_type
+
+
+    @MonteCarloSim.generate_paths
+    def value(self):
+        '''
+        valuation of the derivative
+        '''        
+
+        indicator_matrix = np.zeros((self.n_trials,1))
+
+        if self.observ_type == 'continous':
+            
+            conv_matrix = np.array([[(lambda _: 1 if j >= i and j < i+self.observ_window else 0)(j) for j in range(self.n_intervals)] for i in range(self.n_intervals-self.observ_window+1)]).T
+
+            if self.direction == 'up':
+                if self.knock_type == 'out':
+                    indicator_matrix = 1 - np.max(np.where((np.where(self.price_process >= self.barrier_up, 1, 0) @ conv_matrix) >= self.observ_window, 1, 0), axis=1)
+                elif self.knock_type == 'in':
+                    indicator_matrix = np.max(np.where((np.where(self.price_process >= self.barrier_up, 1, 0) @ conv_matrix) >= self.observ_window, 1, 0), axis=1)
+            elif self.direction == 'down':
+                if self.knock_type == 'out':
+                    indicator_matrix = 1 - np.max(np.where((np.where(self.price_process <= self.barrier_down, 1, 0) @ conv_matrix) >= self.observ_window, 1, 0), axis=1)
+                elif self.knock_type == 'in':
+                    indicator_matrix = np.max(np.where((np.where(self.price_process <= self.barrier_down, 1, 0) @ conv_matrix) >= self.observ_window, 1, 0), axis=1)
+            elif self.direction == 'double':
+                if self.knock_type == 'out':
+                    indicator_matrix = ((1 - np.max(np.where((np.where(self.price_process >= self.barrier_up, 1, 0) @ conv_matrix) >= self.observ_window, 1, 0), axis=1)) *
+                                        (1 - np.max(np.where((np.where(self.price_process <= self.barrier_down, 1, 0) @ conv_matrix) >= self.observ_window, 1, 0), axis=1)))
+                elif self.knock_type == 'in':
+                    indicator_matrix = 1 - ((1 - np.max(np.where((np.where(self.price_process >= self.barrier_up, 1, 0) @ conv_matrix) >= self.observ_window, 1, 0), axis=1)) *
+                                        (1 - np.max(np.where((np.where(self.price_process <= self.barrier_down, 1, 0) @ conv_matrix) >= self.observ_window, 1, 0), axis=1)))     
+
+        elif self.observ_type == 'accum':
+
+            if self.direction == 'up':
+                if self.knock_type == 'out':
+                    indicator_matrix = np.array(np.sum(np.where(self.price_process >= self.barrier_up, 1, 0), axis=1) < self.observ_window, dtype=int)
+                elif self.knock_type == 'in':
+                    indicator_matrix = np.array(np.sum(np.where(self.price_process >= self.barrier_up, 1, 0), axis=1) >= self.observ_window, dtype=int)
+            elif self.direction == 'down':
+                if self.knock_type == 'out':
+                    indicator_matrix = np.array(np.sum(np.where(self.price_process <= self.barrier_down, 1, 0), axis=1) < self.observ_window, dtype=int)
+                elif self.knock_type == 'in':
+                    indicator_matrix = np.array(np.sum(np.where(self.price_process <= self.barrier_down, 1, 0), axis=1) >= self.observ_window, dtype=int)
+            elif self.direction == 'double':
+                if self.knock_type == 'out':
+                    indicator_matrix = (np.array(np.sum(np.where(self.price_process >= self.barrier_up, 1, 0), axis=1) < self.observ_window, dtype=int) *
+                                        np.array(np.sum(np.where(self.price_process <= self.barrier_down, 1, 0), axis=1) < self.observ_window, dtype=int))
+                elif self.knock_type == 'in':
+                    indicator_matrix = 1 - ((1-np.array(np.sum(np.where(self.price_process >= self.barrier_up, 1, 0), axis=1) >= self.observ_window, dtype=int)) *
+                                        (1-np.array(np.sum(np.where(self.price_process <= self.barrier_down, 1, 0), axis=1) >= self.observ_window, dtype=int)))
+                    
+        if self.option_type == 'call':
+            relu_func = np.frompyfunc(lambda x:x-self.strike if x-self.strike >= 0 else 0,1,1)
+        elif self.option_type == 'put':
+            relu_func = np.frompyfunc(lambda x:self.strike-x if self.strike-x >= 0 else 0,1,1)  
+
+        self.payoff_vector = relu_func(self.price_process[:,-1])*indicator_matrix
+        simulated_price = np.exp(-self.rate*self.tau) * np.mean(self.payoff_vector)
+
+        return simulated_price
+
+
+
+
+
 class SnowBallSim(MonteCarloSim):
     '''
     monte carlo simulation for snow ball structures
@@ -669,12 +816,10 @@ class SnowBallSim(MonteCarloSim):
         maturity,
         n_trials,
         nper_per_year,
-        nominal_principal,
-        fixed_yield,
+        notional_principal,
+        fixed_coupond,
         ki_level,
         ko_level,
-        # low_strike=0,
-        # high_strike=1,
         step_down=0,
         ki_fre='day',
         ko_fre='month',
@@ -692,8 +837,8 @@ class SnowBallSim(MonteCarloSim):
         super().__init__(init_price, maturity, n_trials, nper_per_year, model, **model_params)
 
         self.rate = model_params['rate']
-        self.nominal_principal = nominal_principal
-        self.fixed_yield = fixed_yield
+        self.notional_principal = notional_principal
+        self.fixed_coupond = fixed_coupond
         self.ki_barrier = init_price * ki_level
         self.ko_barrier = init_price * ko_level
         self.step_down = step_down
@@ -718,9 +863,9 @@ class SnowBallSim(MonteCarloSim):
 
         relu_func = np.frompyfunc(lambda x:(x/self.spot_price)-1 if self.spot_price-x >= 0 else 0,1,1)    
         ki_payoff = relu_func(self.price_process[:,-1]) * ki_indicator
-        ko_payoff = (np.argmax(ko_indicator_matrix, axis=1) + 1) * ko_indicator * (self.fixed_yield/self.nper_per_year)
-        nki_nko_payoff = self.fixed_yield*self.tau * (1 - ki_indicator) * (1 - ko_indicator)
-        self.payoff_vector = self.nominal_principal * (ko_payoff + ki_payoff*(1 - ko_indicator) + nki_nko_payoff)
+        ko_payoff = (np.argmax(ko_indicator_matrix, axis=1) + 1) * ko_indicator * (self.fixed_coupond/self.nper_per_year)
+        nki_nko_payoff = self.fixed_coupond*self.tau * (1 - ki_indicator) * (1 - ko_indicator)
+        self.payoff_vector = self.notional_principal * (ko_payoff + ki_payoff*(1 - ko_indicator) + nki_nko_payoff)
 
         expire_maturity = ((np.argmax(ko_indicator_matrix, axis=1) + 1) * ko_indicator) / self.nper_per_year
         discount_func = np.frompyfunc(lambda x:np.exp(-self.rate*x),1,1)
@@ -728,6 +873,79 @@ class SnowBallSim(MonteCarloSim):
         simulated_price = np.mean(discount_func(expire_maturity) * self.payoff_vector)
 
         return simulated_price
+
+
+
+
+
+class ParisianSnowBallSim(SnowBallSim):
+    '''
+    monte carlo simulation for parisian snow ball structures
+    '''
+
+    def __init__(
+        self,
+        init_price,
+        maturity,
+        n_trials,
+        nper_per_year,
+        notional_principal,
+        fixed_coupond,
+        ki_level,
+        ko_level,
+        observ_window,
+        step_down=0,
+        ki_fre='day',
+        ko_fre='month',
+        sd_fre='month',
+        observ_type='continous',
+        skip_ko_observe=0,
+        model=GeoBrownianMotion,
+        **model_params):
+        '''
+        intiaialize the structure parameters
+        '''
+
+        super().__init__(init_price, maturity, n_trials, nper_per_year, notional_principal, fixed_coupond, ki_level, ko_level,
+                        step_down, ki_fre, ko_fre, sd_fre, skip_ko_observe, model, **model_params)
+
+        assert observ_type in ('continous', 'accum'), 'The observation type must be continous or accum'
+
+        self.observ_window = observ_window
+        self.observ_type = observ_type
+
+
+    @MonteCarloSim.generate_paths
+    def value(self):
+        '''
+        valuation of the derivative
+        '''
+
+        ko_barrier_matrix = np.array([[(lambda x:self.ko_barrier*(1 - self.step_down*(x//self.sd_interval)))(i) for i in range(self.n_intervals)]]*self.n_trials)
+        ki_indicator_matrix = (np.where(self.price_process < self.ki_barrier, 1, 0) * np.array([[(lambda x:1 if (x+1)%self.ki_interval==0 else 0)(i) for i in range(self.n_intervals)]]*self.n_trials))
+        ko_indicator_matrix = (np.where(self.price_process >= ko_barrier_matrix, 1, 0) * 
+                               np.array([[(lambda x:1 if (x+1)%self.ko_interval==0 and float(x+1)/self.ko_interval > self.skip_ko_observe else 0)(i) for i in range(self.n_intervals)]]*self.n_trials))
+        
+        if self.observ_type == 'continous':
+            conv_matrix = np.array([[(lambda _: 1 if j >= i*self.ki_interval and j < (i+self.observ_window)*self.ki_interval and (j+1)%self.ki_interval == 0 else 0)(j) for j in range(self.n_intervals)] for i in range(int(self.n_intervals/self.ki_interval)-self.observ_window+1)]).T 
+            ki_indicator = np.max(np.where((ki_indicator_matrix @ conv_matrix) >= self.observ_window, 1, 0), axis=1)
+        elif self.observ_type == 'accum':
+            ki_indicator = np.max(np.where(np.sum(ki_indicator_matrix, axis=1) >= self.observ_window, 1, 0), axis=1)
+        ko_indicator = np.max(ko_indicator_matrix, axis=1)
+
+        relu_func = np.frompyfunc(lambda x:(x/self.spot_price)-1 if self.spot_price-x >= 0 else 0,1,1)    
+        ki_payoff = relu_func(self.price_process[:,-1]) * ki_indicator
+        ko_payoff = (np.argmax(ko_indicator_matrix, axis=1) + 1) * ko_indicator * (self.fixed_coupond/self.nper_per_year)
+        nki_nko_payoff = self.fixed_coupond*self.tau * (1 - ki_indicator) * (1 - ko_indicator)
+        self.payoff_vector = self.notional_principal * (ko_payoff + ki_payoff*(1 - ko_indicator) + nki_nko_payoff)
+
+        expire_maturity = ((np.argmax(ko_indicator_matrix, axis=1) + 1) * ko_indicator) / self.nper_per_year
+        discount_func = np.frompyfunc(lambda x:np.exp(-self.rate*x),1,1)
+
+        simulated_price = np.mean(discount_func(expire_maturity) * self.payoff_vector)
+
+        return simulated_price
+
 
 
 
@@ -743,8 +961,8 @@ class PhoenixSim(SnowBallSim):
         maturity,
         n_trials,
         nper_per_year,
-        nominal_principal,
-        fixed_yield,
+        notional_principal,
+        fixed_coupond,
         ki_level,
         ko_level,
         step_down=0,
@@ -758,7 +976,7 @@ class PhoenixSim(SnowBallSim):
         intiaialize the structure parameters
         '''
 
-        super().__init__(init_price, maturity, n_trials, nper_per_year, nominal_principal, fixed_yield, ki_level, ko_level,
+        super().__init__(init_price, maturity, n_trials, nper_per_year, notional_principal, fixed_coupond, ki_level, ko_level,
                         step_down, ki_fre, ko_fre, sd_fre, skip_ko_observe, model, **model_params)
 
     @MonteCarloSim.generate_paths
@@ -776,13 +994,13 @@ class PhoenixSim(SnowBallSim):
         
         yield_payoff = (1 - ki_indicator_matrix) * np.array([[(lambda x:1 if (x+1)%self.ko_interval==0 else 0)(i) for i in range(self.n_intervals)]]*self.n_trials)
         ko_yield = yield_payoff * np.where(np.array([[i+1 for i in range(self.n_intervals)]]*self.n_trials) < np.array((np.argmax(ko_indicator_matrix, axis=1)+1)*ko_indicator).reshape(self.n_trials,1), 1, 0)  
-        ko_payoff = np.sum(ko_yield, axis=1) * ((self.fixed_yield*self.ko_interval)/self.nper_per_year)
+        ko_payoff = np.sum(ko_yield, axis=1) * ((self.fixed_coupond*self.ko_interval)/self.nper_per_year)
 
         relu_func = np.frompyfunc(lambda x:(x/self.spot_price)-1 if self.spot_price-x >= 0 else 0,1,1)    
-        ki_payoff = (relu_func(self.price_process[:,-1]) + (np.sum(yield_payoff, axis=1) * ((self.fixed_yield*self.ko_interval)/self.nper_per_year))) * ki_indicator
+        ki_payoff = (relu_func(self.price_process[:,-1]) + (np.sum(yield_payoff, axis=1) * ((self.fixed_coupond*self.ko_interval)/self.nper_per_year))) * ki_indicator
 
-        nki_nko_payoff = self.fixed_yield*self.tau * (1 - ki_indicator) * (1 - ko_indicator)
-        self.payoff_vector = self.nominal_principal * (ko_payoff + ki_payoff*(1 - ko_indicator) + nki_nko_payoff)
+        nki_nko_payoff = self.fixed_coupond*self.tau * (1 - ki_indicator) * (1 - ko_indicator)
+        self.payoff_vector = self.notional_principal * (ko_payoff + ki_payoff*(1 - ko_indicator) + nki_nko_payoff)
 
         expire_maturity = ((np.argmax(ko_indicator_matrix, axis=1) + 1) * ko_indicator) / self.nper_per_year
         discount_func = np.frompyfunc(lambda x:np.exp(-self.rate*x),1,1)
@@ -805,8 +1023,8 @@ class FCNSim(SnowBallSim):
         maturity,
         n_trials,
         nper_per_year,
-        nominal_principal,
-        fixed_yield,
+        notional_principal,
+        fixed_coupond,
         ki_level,
         ko_level,
         step_down=0,
@@ -819,7 +1037,7 @@ class FCNSim(SnowBallSim):
         intiaialize the structure parameters
         '''
 
-        super().__init__(init_price, maturity, n_trials, nper_per_year, nominal_principal, fixed_yield, ki_level, ko_level, 
+        super().__init__(init_price, maturity, n_trials, nper_per_year, notional_principal, fixed_coupond, ki_level, ko_level, 
                         step_down, None, ko_fre, sd_fre, skip_ko_observe, model, **model_params)
 
     @MonteCarloSim.generate_paths
@@ -833,12 +1051,12 @@ class FCNSim(SnowBallSim):
                                np.array([[(lambda x:1 if (x+1)%self.ko_interval==0 and float(x+1)/self.ko_interval > self.skip_ko_observe else 0)(i) for i in range(self.n_intervals)]]*self.n_trials))
         ko_indicator = np.max(ko_indicator_matrix, axis=1)
 
-        ko_payoff = (np.argmax(ko_indicator_matrix, axis=1) + 1) * ko_indicator * (self.fixed_yield/self.nper_per_year)
+        ko_payoff = (np.argmax(ko_indicator_matrix, axis=1) + 1) * ko_indicator * (self.fixed_coupond/self.nper_per_year)
 
         relu_func = np.frompyfunc(lambda x:(x/self.ki_barrier)-1 if self.ki_barrier-x >= 0 else 0,1,1) 
-        no_ki_payoff = (relu_func(self.price_process[:,-1]) + (self.fixed_yield*self.tau))
+        no_ki_payoff = (relu_func(self.price_process[:,-1]) + (self.fixed_coupond*self.tau))
 
-        self.payoff_vector = self.nominal_principal * (ko_payoff*ko_indicator + no_ki_payoff*(1-ko_indicator))
+        self.payoff_vector = self.notional_principal * (ko_payoff*ko_indicator + no_ki_payoff*(1-ko_indicator))
 
         expire_maturity = ((np.argmax(ko_indicator_matrix, axis=1) + 1) * ko_indicator) / self.nper_per_year
         discount_func = np.frompyfunc(lambda x:np.exp(-self.rate*x),1,1)
@@ -862,7 +1080,7 @@ class AirBagSim(MonteCarloSim):
         maturity,
         n_trials,
         nper_per_year,
-        nominal_principal,
+        notional_principal,
         ki_level,
         ki_participate,
         no_ki_participate,
@@ -879,7 +1097,7 @@ class AirBagSim(MonteCarloSim):
         super().__init__(init_price, maturity, n_trials, nper_per_year, model, **model_params)
 
         self.rate = model_params['rate']
-        self.nominal_principal = nominal_principal
+        self.notional_principal = notional_principal
         self.ki_barrier = init_price * ki_level
         self.ki_participate = ki_participate
         self.no_ki_participate = no_ki_participate
@@ -901,7 +1119,7 @@ class AirBagSim(MonteCarloSim):
         relu_func = np.frompyfunc(lambda x:(x/self.spot_price)-1 if x-self.spot_price >= 0 else 0,1,1)
         no_ki_payoff = self.no_ki_participate * relu_func(self.price_process[:,-1]) 
 
-        self.payoff_vector = self.nominal_principal * (no_ki_payoff*(1-ki_indicator) + ki_payoff*ki_indicator)
+        self.payoff_vector = self.notional_principal * (no_ki_payoff*(1-ki_indicator) + ki_payoff*ki_indicator)
         simulated_price = np.exp(-self.rate*self.tau) * np.mean(self.payoff_vector)
 
         return simulated_price
@@ -921,8 +1139,8 @@ class BoosterSim(SnowBallSim):
         maturity,
         n_trials,
         nper_per_year,
-        nominal_principal,
-        fixed_yield,
+        notional_principal,
+        fixed_coupond,
         ki_level,
         ko_level,
         participate,
@@ -939,7 +1157,7 @@ class BoosterSim(SnowBallSim):
         assert ko_level > 1, 'The knock level must be greater than 100%'
         assert ki_level < 1, 'The knock level must be less than 100%'
 
-        super().__init__(init_price, maturity, n_trials, nper_per_year, nominal_principal, fixed_yield, ki_level, ko_level,
+        super().__init__(init_price, maturity, n_trials, nper_per_year, notional_principal, fixed_coupond, ki_level, ko_level,
                         step_down, None, ko_fre, sd_fre, skip_ko_observe, model, **model_params)
 
         self.participate = participate
@@ -956,12 +1174,12 @@ class BoosterSim(SnowBallSim):
                                np.array([[(lambda x:1 if (x+1)%self.ko_interval==0 and float(x+1)/self.ko_interval > self.skip_ko_observe else 0)(i) for i in range(self.n_intervals)]]*self.n_trials))
         ko_indicator = np.max(ko_indicator_matrix, axis=1)
 
-        ko_payoff = self.fixed_yield
+        ko_payoff = self.fixed_coupond
 
         relu_func = np.frompyfunc(lambda x:self.participate*((x/self.spot_price)-1) if x-self.spot_price >= 0 else (self.ki_barrier/self.spot_price)-1 if x-self.ki_barrier <= 0 else (x/self.spot_price)-1 ,1,1)
         no_ko_payoff = relu_func(self.price_process[:,-1])
 
-        self.payoff_vector = self.nominal_principal * (ko_payoff*ko_indicator + no_ko_payoff*(1-ko_indicator))
+        self.payoff_vector = self.notional_principal * (ko_payoff*ko_indicator + no_ko_payoff*(1-ko_indicator))
 
         expire_maturity = ((np.argmax(ko_indicator_matrix, axis=1) + 1) * ko_indicator) / self.nper_per_year
         discount_func = np.frompyfunc(lambda x:np.exp(-self.rate*x),1,1)
@@ -969,9 +1187,6 @@ class BoosterSim(SnowBallSim):
         simulated_price = np.mean(discount_func(expire_maturity) * self.payoff_vector)
 
         return simulated_price
-
-
-
 
 
 
@@ -1019,12 +1234,14 @@ class BinomialTree(Price):
 
         return None
 
-    def path_judgement(self, spot_price, derivative_value):
+
+    def on_path_update(self, spot_price, derivative_value):
         '''
-        judge the termination conditions in advance
+        update the derivatives prices on each node
         '''
 
         return None
+
 
     def recursion(self, n_iter, spot_price):
         '''
@@ -1034,7 +1251,7 @@ class BinomialTree(Price):
         if n_iter > 1:
 
             derivative_value = np.exp(-(self.rate-self.dividend)*self.delta_time) * (self.p_tilde*self.recursion(n_iter-1, self.u*spot_price) + self.q_tilde*self.recursion(n_iter-1, self.d*spot_price))
-            updated_value = self.path_judgement(spot_price, derivative_value)
+            updated_value = self.on_path_update(spot_price, derivative_value)
 
             if updated_value != None:
                 return updated_value
@@ -1203,9 +1420,9 @@ class AmericanVanillaBinomial(BinomialTree):
             return self.strike - spot_price if spot_price - self.strike < 0 else 0
 
 
-    def path_judgement(self, spot_price, derivative_value):
+    def on_path_update(self, spot_price, derivative_value):
         '''
-        judge the termination conditions in advance
+        update the derivatives prices on each node
         '''
 
         if self.option_type == 'call' and spot_price - self.strike > derivative_value:
@@ -1214,6 +1431,208 @@ class AmericanVanillaBinomial(BinomialTree):
             return self.strike - spot_price
         else:
             return None
+
+
+
+
+
+class ShoutBinomial(BinomialTree):
+    '''
+    binomial tree pricing for shout options
+    '''
+
+    def __init__(
+        self,
+        init_price,
+        maturity,
+        rate,
+        sigma,
+        nper_per_year, 
+        strike,
+        option_type='call'):
+        '''
+        intiaialize the model parameters
+        '''
+
+        super().__init__(init_price, maturity, rate, sigma, nper_per_year)
+
+        assert option_type.lower() in ('call', 'put'), 'The option type must be call or put'
+        
+        self.strike = strike
+        self.option_type = option_type
+
+
+    def payoff(self, spot_price):
+        '''
+        define the terminal payoff for a certain derivative
+        '''
+
+        if self.option_type == 'call':
+            return spot_price - self.strike if spot_price - self.strike > 0 else 0
+        elif self.option_type == 'put':
+            return self.strike - spot_price if spot_price - self.strike < 0 else 0
+
+
+    def on_path_update(self, spot_price, derivative_value):
+        '''
+        update the derivatives prices on each node
+        '''
+
+        if self.option_type == 'call' and spot_price - self.strike > derivative_value:
+            return spot_price - self.strike
+        elif self.option_type == 'put' and self.strike - spot_price > derivative_value:
+            return self.strike - spot_price
+        else:
+            return None
+
+
+    def recursion(self, n_iter, spot_price):
+        '''
+        binomial tree recursion algorithm
+        '''
+
+        if n_iter > 1:
+
+            derivative_value = (self.p_tilde*self.recursion(n_iter-1, self.u*spot_price) + self.q_tilde*self.recursion(n_iter-1, self.d*spot_price))
+            updated_value = self.on_path_update(spot_price, derivative_value)
+
+            if updated_value != None:
+                return updated_value
+            else:
+                return derivative_value
+
+        else:
+            return self.payoff(spot_price)
+
+
+    def value(self):
+        '''
+        valuation of the derivative
+        '''
+
+        return np.exp(-(self.rate-self.dividend)*self.tau) * self.recursion(self.n_intervals, self.spot_price)
+
+
+
+
+
+class TrinomialTree(Price):
+    '''
+    trinomial tree pricing model base class
+    '''
+
+    def __init__(
+        self,
+        init_price,
+        maturity,
+        rate,
+        sigma,
+        nper_per_year,
+        dividend=0):
+        '''
+        intiaialize the model parameters
+        '''
+
+        super().__init__(init_price, maturity)
+
+        self.rate = rate
+        self.sigma = sigma
+        self.dividend = dividend
+        self.nper_per_year = nper_per_year
+        self.delta_time = 1 / nper_per_year
+        self.n_intervals = int(nper_per_year * self.tau)
+
+        self.u = np.exp(self.sigma*np.sqrt(3*self.delta_time))
+        self.d = np.exp(-self.sigma*np.sqrt(3*self.delta_time))
+
+        self.p_u = -np.sqrt(self.delta_time/(12*self.sigma**2))*(self.rate-self.dividend-0.5*self.sigma**2) + (1/6)
+        self.p_m = 2/3
+        self.p_d = np.sqrt(self.delta_time/(12*self.sigma**2))*(self.rate-self.dividend-0.5*self.sigma**2) + (1/6)
+
+
+    @abc.abstractmethod
+    def payoff(self, spot_price):
+        '''
+        define the terminal payoff for a certain derivative
+        '''
+
+        return None
+
+
+    def on_path_update(self, spot_price, derivative_value):
+        '''
+        update the derivatives prices on each node
+        '''
+
+        return None
+
+
+    def recursion(self, n_iter, spot_price):
+        '''
+        trinomial tree recursion algorithm
+        '''
+
+        if n_iter > 1:
+
+            derivative_value = np.exp(-(self.rate-self.dividend)*self.delta_time) * (self.p_u*self.recursion(n_iter-1, self.u*spot_price) + self.p_m*self.recursion(n_iter-1, spot_price) + self.p_d*self.recursion(n_iter-1, self.d*spot_price))
+            updated_value = self.on_path_update(spot_price, derivative_value)
+
+            if updated_value != None:
+                return updated_value
+            else:
+                return derivative_value
+
+        else:
+            return self.payoff(spot_price)
+
+
+    def value(self):
+        '''
+        valuation of the derivative
+        '''
+
+        return self.recursion(self.n_intervals, self.spot_price)
+
+
+
+
+
+class EuropeanVanillaTrinomial(TrinomialTree):
+    '''
+    trinomial tree pricing for european vanilla options
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        rate, 
+        sigma, 
+        nper_per_year, 
+        strike, 
+        option_type='call'):
+        '''
+        intiaialize the model parameters
+        '''
+        
+        super().__init__(init_price, maturity, rate, sigma, nper_per_year)
+
+        assert option_type.lower() in ('call', 'put'), 'The option type must be call or put'
+
+        self.strike = strike
+        self.option_type = option_type
+
+
+    def payoff(self, spot_price):
+        '''
+        define the terminal payoff for a certain derivative
+        '''
+
+        if self.option_type == 'call':
+            return spot_price - self.strike if spot_price - self.strike > 0 else 0
+        elif self.option_type == 'put':
+            return self.strike - spot_price if spot_price - self.strike < 0 else 0
+
 
 
 
@@ -1297,6 +1716,8 @@ class FiniteDifference(Price):
                 self.m2_matrix[j, j+1] = gamma
                 self.m1_matrix[j+1, j] = -alpha
                 self.m2_matrix[j+1, j] = alpha
+
+        self.inv_m1_matrix = la.inv(self.m1_matrix)
             
 
     @abc.abstractmethod
@@ -1313,9 +1734,18 @@ class FiniteDifference(Price):
         define the boundary condition for a certain derivative 
         '''
 
-        assert boundary_type in ('Boundary type must be up or low')
+        assert boundary_type in ('up','low'), 'Boundary type must be up or low'
 
         return None
+
+
+    def on_path_update(self):
+        '''
+        update the derivatives prices on each node
+        '''
+
+        pass
+
 
     def value(self):
         '''
@@ -1324,6 +1754,7 @@ class FiniteDifference(Price):
 
         try:
             self.value_vector
+
         except:
 
             self.value_vector = np.array([[self.payoff((j+1)*self.delta_s) for j in range(self.n_price_intervals)]]).T
@@ -1334,7 +1765,9 @@ class FiniteDifference(Price):
                 b_vector[0] = self.__alpha_j(1) * (self.boundary_value('low', i+1)+self.boundary_value('low', i+2))                           
                 b_vector[-1] = self.__alpha_j(self.n_price_intervals-1) * (self.boundary_value('up', i+1)+self.boundary_value('up', i+2))      
 
-                self.value_vector = la.inv(self.m1_matrix) @ (self.m2_matrix @ self.value_vector + b_vector)
+                self.value_vector = self.inv_m1_matrix @ (self.m2_matrix @ self.value_vector + b_vector)
+
+                self.on_path_update()
 
         return self.value_vector[np.argmin(np.abs(self.spot_price-np.array([(j+1)*self.delta_s for j in range(self.n_price_intervals)])))][0]
 
@@ -1357,7 +1790,7 @@ class EuropeanVanillaFiniteDiff(FiniteDifference):
         nper_per_year, 
         n_price_intervals, 
         strike, 
-        option_type='call', 
+        option_type='call',
         dividend=0):
         '''
         intiaialize the model parameters
@@ -1400,6 +1833,77 @@ class EuropeanVanillaFiniteDiff(FiniteDifference):
 
 
 
+class AmericanVanillaFiniteDiff(FiniteDifference):
+    '''
+    finite difference pricing for american vanilla options
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        rate, 
+        sigma, 
+        s_max, 
+        nper_per_year, 
+        n_price_intervals, 
+        strike, 
+        option_type='call', 
+        dividend=0):
+        '''
+        intiaialize the model parameters
+        '''
+
+        super().__init__(init_price, maturity, rate, sigma, s_max, nper_per_year, n_price_intervals, dividend)
+
+        assert option_type.lower() in ('call', 'put'), 'The option type must be call or put'
+
+        self.strike = strike
+        self.option_type = option_type
+
+    def payoff(self, spot_price):
+        '''
+        define the terminal payoff of a certain derivative
+        '''
+
+        if self.option_type == 'call':
+            return spot_price - self.strike if spot_price - self.strike > 0 else 0
+        elif self.option_type == 'put':
+            return self.strike - spot_price if spot_price - self.strike < 0 else 0
+
+
+    def boundary_value(self, boundary_type, time_i):
+        '''
+        define the terminal payoff for a certain derivative
+        '''
+
+        if self.option_type == 'call':
+            if boundary_type == 'up':
+                return self.s_max - self.strike*np.exp(-self.rate*(self.tau-time_i*self.delta_time))
+            elif boundary_type == 'low':
+                return 0
+        elif self.option_type == 'put':
+            if boundary_type == 'up':
+                return 0
+            elif boundary_type == 'low':
+                return self.strike*np.exp(-self.rate*(self.tau-time_i*self.delta_time))
+
+
+    def on_path_update(self):
+        '''
+        update the derivatives prices on each node
+        '''
+
+        spot_price_vector = np.array([[(j+1)*self.delta_s for j in range(self.n_price_intervals)]]).T
+
+        if self.option_type == 'call':
+            self.value_vector = np.maximum(spot_price_vector - self.strike, self.value_vector)
+        elif self.option_type == 'put':
+            self.value_vector = np.maximum(self.strike - spot_price_vector, self.value_vector)
+
+    
+
+
 
 class LeastSquaredMonteCarloSim(MonteCarloSim):
     '''
@@ -1410,10 +1914,10 @@ class LeastSquaredMonteCarloSim(MonteCarloSim):
         self, 
         init_price, 
         maturity, 
-        n_trials, 
+        n_trials,
         nper_per_year, 
         regression_model,
-        fetures_order,
+        fetures_degree,
         model, 
         **model_params):
         '''
@@ -1425,12 +1929,13 @@ class LeastSquaredMonteCarloSim(MonteCarloSim):
         try:
             self.model_params['rate']
         except:
-            raise ValueError('Longstaff-Schwarz method requires a discounted rate')
+            raise ValueError('Longstaff-Schwartz method requires a discounted rate')
 
         regression_model_list = [
             LinearRegression,
             Ridge,
             Lasso,
+            LassoLars,
             ElasticNet,
             KNeighborsRegressor,
             SVR,
@@ -1442,10 +1947,10 @@ class LeastSquaredMonteCarloSim(MonteCarloSim):
             GradientBoostingRegressor,
             BaggingRegressor]
         assert regression_model in regression_model_list, 'Please select an available regression model'
-        assert isinstance(fetures_order, int) and fetures_order >= 1, 'Number of fetures must be integer and no less than 1'
+        assert isinstance(fetures_degree, int) and fetures_degree >= 1, 'Number of fetures must be integer and no less than 1'
 
         self.regression_model = regression_model
-        self.fetures_order = fetures_order
+        self.fetures_degree = fetures_degree
         self.delta_time = 1 / nper_per_year
 
 
@@ -1495,13 +2000,12 @@ class LeastSquaredMonteCarloSim(MonteCarloSim):
             itm_index = self.itm_path_index(-i-2)
             if len(itm_index) < 1:
                 self.exercise_matrix = np.concatenate([np.array([0]*self.n_trials).reshape(len(exercise_vector),1), self.exercise_matrix], axis=1)
-                continue
 
             itm_paths = self.price_process[itm_index].reshape(len(itm_index), self.n_intervals)
             dis_cash_flow = np.exp(-self.rate*self.delta_time)*(self.payoff(-i-1)[np.array(itm_index)])           
 
             reg_X = np.ones((len(itm_index), 1))
-            for j in range(self.fetures_order):
+            for j in range(self.fetures_degree):
                 reg_X = np.concatenate([reg_X, np.array([[x_value**(j+1) for x_value in itm_paths[:,-i-2]]]).T], axis=1)
 
             regressor = self.regression_model().fit(reg_X, dis_cash_flow)
@@ -1540,7 +2044,7 @@ class AmericanVanillaLSMC(LeastSquaredMonteCarloSim):
         strike,
         option_type='put', 
         regression_model=LinearRegression,
-        fetures_order=2,
+        fetures_degree=2,
         model=GeoBrownianMotion,
         **model_params):
         '''
@@ -1549,7 +2053,7 @@ class AmericanVanillaLSMC(LeastSquaredMonteCarloSim):
 
         assert option_type.lower() in ('call', 'put'), 'The option type must be call or put'
 
-        super().__init__(init_price, maturity, n_trials, nper_per_year, regression_model, fetures_order, model, **model_params)
+        super().__init__(init_price, maturity, n_trials, nper_per_year, regression_model, fetures_degree, model, **model_params)
 
         self.rate = model_params['rate']
         self.strike = strike
@@ -1601,7 +2105,7 @@ class AmericanAsianLSMC(LeastSquaredMonteCarloSim):
         option_type='put',
         ave_type='arith',
         regression_model=LinearRegression,
-        fetures_order=2,
+        fetures_degree=2,
         model=GeoBrownianMotion,
         **model_params):
         '''
@@ -1611,7 +2115,7 @@ class AmericanAsianLSMC(LeastSquaredMonteCarloSim):
         assert option_type.lower() in ('call', 'put'), 'The option type must be call or put'
         assert ave_type.lower() in ('arith', 'geo'), 'The average type must be arithmetic or geometric'
 
-        super().__init__(init_price, maturity, n_trials, nper_per_year, regression_model, fetures_order, model, **model_params)
+        super().__init__(init_price, maturity, n_trials, nper_per_year, regression_model, fetures_degree, model, **model_params)
 
         self.rate = model_params['rate']
         self.strike = strike
@@ -1656,4 +2160,154 @@ class AmericanAsianLSMC(LeastSquaredMonteCarloSim):
                 return np.argwhere(np.mean(self.price_process[:,:time_i], axis=1) < self.strike)
             elif self.ave_type == 'geo':
                 return np.argwhere(np.exp(np.mean(np.log(self.price_process[:,:time_i]), axis=1)) < self.strike)   
+
+
+
+
+
+class Quadrature(Price):
+    '''
+    quadrature base class
+    '''
+
+    def __init__(
+        self,
+        init_price,
+        maturity,
+        n_intervals,
+        integral_type,
+        model_type,
+        **model_params):
+        '''
+        intiaialize the structure parameters
+        '''
+
+        super().__init__(init_price, maturity)
+
+        self.n_intervals = n_intervals
+        self.integral_type = integral_type
+        self.model_type = model_type
+        self.model_params = model_params
+        self.weight = 6/self.n_intervals
+
+        self.pdf_type = None
+
+        model_dict = {
+            'gbm':['mu', 'sigma'],
+            'bachelier':['mu', 'sigma']}
+        assert model_type in model_dict.keys(), 'Please select an avilable underlying price distribution'
+        assert integral_type in ('left', 'middle', 'trapezoidal'), 'Please select an avilable integration type' # 'gaussian'
+
+        try:
+            if self.model_type == 'gbm':
+                self.mu = self.model_params['mu']
+                self.sigma = self.model_params['sigma']
+                self.pdf_type = 'normal'
+            elif self.model_type == 'bachelier':
+                self.mu = self.model_params['mu']
+                self.sigma = self.model_params['sigma']   
+                self.pdf_type = 'normal'
+        except:
+            raise NameError('Distribution parameters input are not correct')
+        
+        
+    @abc.abstractmethod
+    def payoff(self, s):
+        '''
+        define the exercise payoff for a certain derivative
+        '''
+
+        return None
+
+
+    def pdf(self, y):
+        '''
+        return the pdf function value for a certain distribution
+        '''
+
+        if self.pdf_type == 'normal':
+            pdf_value =  (1/np.sqrt(2*np.pi))*np.exp(-0.5*y**2)
+        
+        return pdf_value
+
+
+    def model_price(self, x):
+        '''
+        return the analyatical spot price for a certain model
+        '''
+
+        if self.model_type == 'gbm':
+            current_price = self.spot_price*np.exp((self.mu-0.5*self.sigma**2)*self.tau+self.sigma*np.sqrt(self.tau)*x)
+        elif self.model_type == 'bachelier':
+            current_price = self.spot_price*np.exp(-self.mu*self.tau)+self.sigma*np.sqrt((np.exp(2*self.mu*self.tau)-1)/(2*self.mu))*x
+
+        return current_price
+
+
+    def value(self):
+        '''
+        valuation of the derivative
+        '''
+
+        quadrature_sum = 0
+
+        for i in range(self.n_intervals):
+
+            if self.integral_type == 'middle':
+                quadrature_sum += self.weight*self.payoff(self.model_price(-3+self.weight*(i+0.5)))*self.pdf(-3+self.weight*(i+0.5))
+            elif self.integral_type == 'left':
+                quadrature_sum += self.weight*self.payoff(self.model_price(-3+self.weight*i))*self.pdf(-3+self.weight*i)
+            elif self.integral_type == 'trapezoidal':
+                quadrature_sum += 0.5*(self.weight*self.payoff(self.model_price(-3+self.weight*i))*self.pdf(-3+self.weight*i) + self.weight*self.payoff(self.model_price(-3+self.weight*(i+1)))*self.pdf(-3+self.weight*(i+1)))
+
+        return quadrature_sum
+
+
+
+
+
+class EuropeanVanillaQuadrature(Quadrature):
+    '''
+    quadrature pricing for european vanilla options
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        n_intervals, 
+        strike, 
+        option_type='call', 
+        integral_type='middle', 
+        model_type='gbm', 
+        **model_params):
+        '''
+        intiaialize the structure parameters
+        '''
+
+        super().__init__(init_price, maturity, n_intervals, integral_type, model_type, **model_params)
+
+        self.strike = strike
+        self.option_type = option_type
+
+
+    def payoff(self, s):
+        '''
+        define the exercise payoff for a certain derivative
+        '''
+
+        if self.option_type == 'call':
+            if s >= self.strike:
+                return s - self.strike
+            else:
+                return 0
+        elif self.option_type == 'put':
+            if s <= self.strike:
+                return self.strike - s
+            else:
+                return 0
+
+
+
+
 
