@@ -150,6 +150,61 @@ class BlackScholesGreeks(object):
         return rho_value
 
 
+    @reset_params
+    def vanna(self, spot_price=None, maturity=None):
+        '''
+        compute the vanna of black scholes model
+        '''
+
+        vanna_value = -norm.pdf(self.__d_pos)*(self.__d_neg/self.sigma)
+
+        return vanna_value
+
+        
+    @reset_params
+    def charm(self, spot_price=None, maturity=None):
+        '''
+        compute the charm of black scholes model
+        '''
+
+        charm_value = (norm.pdf(self.__d_pos)*self.__d_neg)/(2*self.tau) - (self.rate*norm.pdf(self.__d_pos))/(self.sigma*np.sqrt(self.tau))
+        
+        return charm_value
+
+
+    @reset_params
+    def vomma(self, spot_price=None, maturity=None):
+        '''
+        compute the charm of black scholes model
+        '''
+
+        vomma_value = self.spot_price*np.sqrt(self.tau)*norm.pdf(self.__d_pos)*(self.__d_pos*self.__d_neg/self.sigma)
+
+        return vomma_value
+
+
+    @reset_params
+    def veta(self, spot_price=None, maturity=None):
+        '''
+        compute the veta of black scholes model
+        '''
+
+        veta_value = self.spot_price*norm.pdf(self.__d_pos)*((self.rate*self.__d_pos)/self.sigma - (self.__d_pos*self.__d_neg+1)/(2*np.sqrt(self.tau)))
+
+        return veta_value
+
+
+    @reset_params
+    def speed(self, spot_price=None, maturity=None):
+        '''
+        compute the speed of black scholes model
+        '''
+
+        speed_value = (norm.pdf(self.__d_pos)*(-self.__d_pos-self.sigma*np.sqrt(self.tau)))/(self.spot_price**2 * self.sigma**2 * self.tau)
+
+        return speed_value
+
+
     def plot_delta(self, wrt_spot=True, moneyness_cut=0.2):
         '''
         plot delta curve with respect to spot price or maturity
@@ -306,6 +361,161 @@ class BlackScholesGreeks(object):
         return rho_range
 
 
+    def plot_vanna(self, wrt_spot=True, moneyness_cut=0.2):
+        '''
+        plot vanna with respect to spot price or maturity
+        '''
+
+        if wrt_spot:
+            price_range = np.linspace(self.strike_price*(1-moneyness_cut), self.strike_price*(1+moneyness_cut), 500)
+            vanna_range = [self.vanna(spot_price=price) for price in price_range]
+
+            plt.figure(figsize=(20, 10))
+            plt.title('Vanna - Spot Price Plot on Black Scholes Model with Strike Price {}'.format(self.strike_price))
+            plt.xlabel('Spot Price')
+            plt.ylabel('Vanna Value')
+            plt.grid()
+            plt.plot(price_range, vanna_range)
+            plt.show()   
+        else:
+            time_range = np.linspace(0.01, 2, 500)
+            vanna_range = [self.vanna(maturity=time) for time in time_range]
+
+            plt.figure(figsize=(20, 10))
+            plt.title('Vanna - Maturity Plot of {} Option on Black Scholes Model with Log Moneyness {}'.format(self.type.upper(), np.log(self.spot_price / self.strike_price)))
+            plt.xlabel('Mautiry')
+            plt.ylabel('Vanna Value')
+            plt.grid()
+            plt.plot(time_range, vanna_range)
+            plt.show()  
+
+        return vanna_range
+
+
+    def plot_charm(self, wrt_spot=True, moneyness_cut=0.2):
+        '''
+        plot charm with respect to spot price or maturity
+        '''
+
+        if wrt_spot:
+            price_range = np.linspace(self.strike_price*(1-moneyness_cut), self.strike_price*(1+moneyness_cut), 500)
+            chram_range = [self.charm(spot_price=price) for price in price_range]
+
+            plt.figure(figsize=(20, 10))
+            plt.title('Charm - Spot Price Plot on Black Scholes Model with Strike Price {}'.format(self.strike_price))
+            plt.xlabel('Spot Price')
+            plt.ylabel('Charm Value')
+            plt.grid()
+            plt.plot(price_range, chram_range)
+            plt.show()   
+        else:
+            time_range = np.linspace(0.01, 2, 500)
+            chram_range = [self.charm(maturity=time) for time in time_range]
+
+            plt.figure(figsize=(20, 10))
+            plt.title('Charm - Maturity Plot of {} Option on Black Scholes Model with Log Moneyness {}'.format(self.type.upper(), np.log(self.spot_price / self.strike_price)))
+            plt.xlabel('Mautiry')
+            plt.ylabel('Charm Value')
+            plt.grid()
+            plt.plot(time_range, chram_range)
+            plt.show()  
+
+        return chram_range
+
+
+    def plot_vomma(self, wrt_spot=True, moneyness_cut=0.2):
+        '''
+        plot vomma with respect to spot price or maturity
+        '''
+
+        if wrt_spot:
+            price_range = np.linspace(self.strike_price*(1-moneyness_cut), self.strike_price*(1+moneyness_cut), 500)
+            vomma_range = [self.vomma(spot_price=price) for price in price_range]
+
+            plt.figure(figsize=(20, 10))
+            plt.title('Vomma - Spot Price Plot on Black Scholes Model with Strike Price {}'.format(self.strike_price))
+            plt.xlabel('Spot Price')
+            plt.ylabel('Vomma Value')
+            plt.grid()
+            plt.plot(price_range, vomma_range)
+            plt.show()   
+        else:
+            time_range = np.linspace(0.01, 2, 500)
+            vomma_range = [self.vomma(maturity=time) for time in time_range]
+
+            plt.figure(figsize=(20, 10))
+            plt.title('Vomma - Maturity Plot of {} Option on Black Scholes Model with Log Moneyness {}'.format(self.type.upper(), np.log(self.spot_price / self.strike_price)))
+            plt.xlabel('Mautiry')
+            plt.ylabel('Vomma Value')
+            plt.grid()
+            plt.plot(time_range, vomma_range)
+            plt.show()  
+
+        return vomma_range
+
+
+    def plot_veta(self, wrt_spot=True, moneyness_cut=0.2):
+        '''
+        plot veta with respect to spot price or maturity
+        '''
+
+        if wrt_spot:
+            price_range = np.linspace(self.strike_price*(1-moneyness_cut), self.strike_price*(1+moneyness_cut), 500)
+            veta_range = [self.veta(spot_price=price) for price in price_range]
+
+            plt.figure(figsize=(20, 10))
+            plt.title('Veta - Spot Price Plot on Black Scholes Model with Strike Price {}'.format(self.strike_price))
+            plt.xlabel('Spot Price')
+            plt.ylabel('Veta Value')
+            plt.grid()
+            plt.plot(price_range, veta_range)
+            plt.show()   
+        else:
+            time_range = np.linspace(0.01, 2, 500)
+            veta_range = [self.veta(maturity=time) for time in time_range]
+
+            plt.figure(figsize=(20, 10))
+            plt.title('Veta - Maturity Plot of {} Option on Black Scholes Model with Log Moneyness {}'.format(self.type.upper(), np.log(self.spot_price / self.strike_price)))
+            plt.xlabel('Mautiry')
+            plt.ylabel('Veta Value')
+            plt.grid()
+            plt.plot(time_range, veta_range)
+            plt.show()  
+
+        return veta_range
+
+
+    def plot_speed(self, wrt_spot=True, moneyness_cut=0.2):
+        '''
+        plot speed with respect to spot price or maturity
+        '''
+
+        if wrt_spot:
+            price_range = np.linspace(self.strike_price*(1-moneyness_cut), self.strike_price*(1+moneyness_cut), 500)
+            speed_range = [self.speed(spot_price=price) for price in price_range]
+
+            plt.figure(figsize=(20, 10))
+            plt.title('Speed - Spot Price Plot on Black Scholes Model with Strike Price {}'.format(self.strike_price))
+            plt.xlabel('Spot Price')
+            plt.ylabel('Speed Value')
+            plt.grid()
+            plt.plot(price_range, speed_range)
+            plt.show()   
+        else:
+            time_range = np.linspace(0.01, 2, 500)
+            speed_range = [self.speed(maturity=time) for time in time_range]
+
+            plt.figure(figsize=(20, 10))
+            plt.title('Speed - Maturity Plot of {} Option on Black Scholes Model with Log Moneyness {}'.format(self.type.upper(), np.log(self.spot_price / self.strike_price)))
+            plt.xlabel('Mautiry')
+            plt.ylabel('Speed Value')
+            plt.grid()
+            plt.plot(time_range, speed_range)
+            plt.show()  
+
+        return speed_range
+
+
     def delta_surface(self, moneyness_cut=0.2, interval_t=500, interval_moneyness=500):
         '''
         plot delta surface with respect to log moneyness and maturity
@@ -439,6 +649,140 @@ class BlackScholesGreeks(object):
         plt.show()
 
         return rho_array
+
+    def vanna_surface(self, moneyness_cut=0.2, interval_t=500, interval_moneyness=500):
+        '''
+        plot vanna surface with respect to log moneyness and maturity
+        '''
+
+        time_range = np.linspace(0.01, 2, interval_t)
+        price_range = np.linspace(self.strike_price*(1-moneyness_cut), self.strike_price*(1+moneyness_cut), interval_moneyness)
+        moneyness_range = [np.log(price/self.strike_price) for price in price_range]
+        vanna_array = np.zeros((len(time_range), len(moneyness_range)))
+
+        for i in range(len(time_range)):
+            for j in range(len(moneyness_range)):
+                vanna_array[i, j] = self.vanna(spot_price=price_range[j], maturity=time_range[i])
+
+        fig = plt.figure(figsize=(20,20))
+        ax = fig.gca(projection='3d')
+        X, Y = np.meshgrid(moneyness_range, time_range)
+        surf = ax.plot_surface(X, Y, vanna_array, cmap=cm.coolwarm, linewidth=0, antialiased=False)
+        ax.set_ylabel('Maturity')
+        ax.set_xlabel('Log Moneyness')
+        ax.set_zlabel('Vanna Value')
+        plt.title('Vanna Surface of {} Option on Black Scholes Model'.format(self.type.upper()))
+        plt.show()
+
+        return vanna_array
+
+
+    def charm_surface(self, moneyness_cut=0.2, interval_t=500, interval_moneyness=500):
+        '''
+        plot charm surface with respect to log moneyness and maturity
+        '''
+
+        time_range = np.linspace(0.01, 2, interval_t)
+        price_range = np.linspace(self.strike_price*(1-moneyness_cut), self.strike_price*(1+moneyness_cut), interval_moneyness)
+        moneyness_range = [np.log(price/self.strike_price) for price in price_range]
+        charm_array = np.zeros((len(time_range), len(moneyness_range)))
+
+        for i in range(len(time_range)):
+            for j in range(len(moneyness_range)):
+                charm_array[i, j] = self.charm(spot_price=price_range[j], maturity=time_range[i])
+
+        fig = plt.figure(figsize=(20,20))
+        ax = fig.gca(projection='3d')
+        X, Y = np.meshgrid(moneyness_range, time_range)
+        surf = ax.plot_surface(X, Y, charm_array, cmap=cm.coolwarm, linewidth=0, antialiased=False)
+        ax.set_ylabel('Maturity')
+        ax.set_xlabel('Log Moneyness')
+        ax.set_zlabel('Charm Value')
+        plt.title('Charm Surface of {} Option on Black Scholes Model'.format(self.type.upper()))
+        plt.show()
+
+        return charm_array
+
+
+    def vomma_surface(self, moneyness_cut=0.2, interval_t=500, interval_moneyness=500):
+        '''
+        plot vomma surface with respect to log moneyness and maturity
+        '''
+
+        time_range = np.linspace(0.01, 2, interval_t)
+        price_range = np.linspace(self.strike_price*(1-moneyness_cut), self.strike_price*(1+moneyness_cut), interval_moneyness)
+        moneyness_range = [np.log(price/self.strike_price) for price in price_range]
+        vomma_array = np.zeros((len(time_range), len(moneyness_range)))
+
+        for i in range(len(time_range)):
+            for j in range(len(moneyness_range)):
+                vomma_array[i, j] = self.vomma(spot_price=price_range[j], maturity=time_range[i])
+
+        fig = plt.figure(figsize=(20,20))
+        ax = fig.gca(projection='3d')
+        X, Y = np.meshgrid(moneyness_range, time_range)
+        surf = ax.plot_surface(X, Y, vomma_array, cmap=cm.coolwarm, linewidth=0, antialiased=False)
+        ax.set_ylabel('Maturity')
+        ax.set_xlabel('Log Moneyness')
+        ax.set_zlabel('Vomma Value')
+        plt.title('Vomma Surface of {} Option on Black Scholes Model'.format(self.type.upper()))
+        plt.show()
+
+        return vomma_array
+
+
+    def veta_surface(self, moneyness_cut=0.2, interval_t=500, interval_moneyness=500):
+        '''
+        plot veta surface with respect to log moneyness and maturity
+        '''
+
+        time_range = np.linspace(0.01, 2, interval_t)
+        price_range = np.linspace(self.strike_price*(1-moneyness_cut), self.strike_price*(1+moneyness_cut), interval_moneyness)
+        moneyness_range = [np.log(price/self.strike_price) for price in price_range]
+        veta_array = np.zeros((len(time_range), len(moneyness_range)))
+
+        for i in range(len(time_range)):
+            for j in range(len(moneyness_range)):
+                veta_array[i, j] = self.veta(spot_price=price_range[j], maturity=time_range[i])
+
+        fig = plt.figure(figsize=(20,20))
+        ax = fig.gca(projection='3d')
+        X, Y = np.meshgrid(moneyness_range, time_range)
+        surf = ax.plot_surface(X, Y, veta_array, cmap=cm.coolwarm, linewidth=0, antialiased=False)
+        ax.set_ylabel('Maturity')
+        ax.set_xlabel('Log Moneyness')
+        ax.set_zlabel('Veta Value')
+        plt.title('Veta Surface of {} Option on Black Scholes Model'.format(self.type.upper()))
+        plt.show()
+
+        return veta_array
+
+
+    def speed_surface(self, moneyness_cut=0.2, interval_t=500, interval_moneyness=500):
+        '''
+        plot speed surface with respect to log moneyness and maturity
+        '''
+
+        time_range = np.linspace(0.01, 2, interval_t)
+        price_range = np.linspace(self.strike_price*(1-moneyness_cut), self.strike_price*(1+moneyness_cut), interval_moneyness)
+        moneyness_range = [np.log(price/self.strike_price) for price in price_range]
+        speed_array = np.zeros((len(time_range), len(moneyness_range)))
+
+        for i in range(len(time_range)):
+            for j in range(len(moneyness_range)):
+                speed_array[i, j] = self.speed(spot_price=price_range[j], maturity=time_range[i])
+
+        fig = plt.figure(figsize=(20,20))
+        ax = fig.gca(projection='3d')
+        X, Y = np.meshgrid(moneyness_range, time_range)
+        surf = ax.plot_surface(X, Y, speed_array, cmap=cm.coolwarm, linewidth=0, antialiased=False)
+        ax.set_ylabel('Maturity')
+        ax.set_xlabel('Log Moneyness')
+        ax.set_zlabel('Speed Value')
+        plt.title('Speed Surface of {} Option on Black Scholes Model'.format(self.type.upper()))
+        plt.show()
+
+        return speed_array
 
 
 
@@ -949,4 +1293,7 @@ class GreeksSim(object):
         plt.show()
 
         return rho_array
+
+
+
 
