@@ -1833,6 +1833,165 @@ class EuropeanVanillaFiniteDiff(FiniteDifference):
 
 
 
+class EuropeanBarrierFiniteDiff(FiniteDifference):
+    '''
+    finite difference pricing for european barrier options
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        rate, 
+        sigma, 
+        s_max, 
+        nper_per_year, 
+        n_price_intervals, 
+        strike, 
+        barrier_up=None, 
+        barrier_down=None,
+        option_type='call', 
+        knock_type='out', 
+        direction='up',  
+        dividend=0):
+        '''
+        intiaialize the model parameters
+        '''
+
+        super().__init__(init_price, maturity, rate, sigma, s_max, nper_per_year, n_price_intervals, dividend)
+
+        assert option_type.lower() in ('call', 'put'), 'The option type must be call or put'
+        assert knock_type.lower() in ('in', 'out'), 'Knock type must be in or out'
+        assert direction.lower() in ('up', 'down', 'double'), 'Direction type must be up or down or double'
+        if direction == 'up':
+            assert barrier_up != None , 'Please input an upward barrier'
+        elif direction == 'down':
+            assert barrier_down != None , 'Please input a downward barrier'
+        elif direction == 'double':
+            assert barrier_up != None and barrier_down != None, 'Please input both an upward barrier and a downward barrier'
+
+        self.strike = strike
+        self.option_type = option_type
+        self.knock_type = knock_type
+        self.direction = direction
+        self.barrier_up = init_price*barrier_up
+        self.barrier_down = init_price*barrier_down
+
+
+    def payoff(self, spot_price):
+        '''
+        define the terminal payoff of a certain derivative
+        '''
+
+        if self.option_type == 'call':
+            return spot_price - self.strike if spot_price - self.strike > 0 else 0
+        elif self.option_type == 'put':
+            return self.strike - spot_price if spot_price - self.strike < 0 else 0
+
+
+    def boundary_value(self, boundary_type, time_i):
+        '''
+        define the boundary condition for a certain derivative 
+        '''
+
+        if self.direction == 'up':
+            if self.knock_type == 'out':
+                if self.option_type == 'call':
+                    if boundary_type == 'up':
+                        return 0
+                    elif boundary_type == 'low':
+                        return 0
+                elif self.option_type == 'put':
+                    if boundary_type == 'up':
+                        return 0
+                    elif boundary_type == 'low':
+                        return self.strike*np.exp(-self.rate*(self.tau-time_i*self.delta_time))      
+            elif self.knock_type == 'in':   
+                if self.option_type == 'call':
+                    if boundary_type == 'up':
+                        return self.s_max - self.strike*np.exp(-self.rate*(self.tau-time_i*self.delta_time))
+                    elif boundary_type == 'low':
+                        return 0
+                elif self.option_type == 'put':
+                    if boundary_type == 'up':
+                        return 0
+                    elif boundary_type == 'low':
+                        return 0
+        if self.direction == 'down':
+            if self.knock_type == 'out':
+                if self.option_type == 'call':
+                    if boundary_type == 'up':
+                        return self.s_max - self.strike*np.exp(-self.rate*(self.tau-time_i*self.delta_time))
+                    elif boundary_type == 'low':
+                        return 0
+                elif self.option_type == 'put':
+                    if boundary_type == 'up':
+                        return 0
+                    elif boundary_type == 'low':
+                        return 0
+            elif self.knock_type == 'in':   
+                if self.option_type == 'call':
+                    if boundary_type == 'up':
+                        return 0
+                    elif boundary_type == 'low':
+                        return 0
+                elif self.option_type == 'put':
+                    if boundary_type == 'up':
+                        return 0
+                    elif boundary_type == 'low':
+                        return self.strike*np.exp(-self.rate*(self.tau-time_i*self.delta_time)) 
+        if self.direction == 'double':
+            if self.knock_type == 'out':
+                if self.option_type == 'call':
+                    if boundary_type == 'up':
+                        return 0
+                    elif boundary_type == 'low':
+                        return 0
+                elif self.option_type == 'put':
+                    if boundary_type == 'up':
+                        return 0
+                    elif boundary_type == 'low':
+                        return 0     
+            elif self.knock_type == 'in':   
+                if self.option_type == 'call':
+                    if boundary_type == 'up':
+                        return self.s_max - self.strike*np.exp(-self.rate*(self.tau-time_i*self.delta_time))
+                    elif boundary_type == 'low':
+                        return 0
+                elif self.option_type == 'put':
+                    if boundary_type == 'up':
+                        return 0
+                    elif boundary_type == 'low':
+                        return self.strike*np.exp(-self.rate*(self.tau-time_i*self.delta_time)) 
+
+
+    def on_path_update(self):
+        '''
+        update the derivatives prices on each node
+        '''
+
+        spot_price_vector = np.array([[(j+1)*self.delta_s for j in range(self.n_price_intervals)]]).T
+
+        if self.direction == 'up':
+            if self.knock_type == 'out':
+                self.value_vector = np.where(spot_price_vector > self.barrier_up, 0, 1) * self.value_vector
+            elif self.knock_type == 'in':
+                self.value_vector = np.where(spot_price_vector > self.barrier_up, 1, 0) * self.value_vector
+        elif self.direction == 'down':
+            if self.knock_type == 'out':
+                self.value_vector = np.where(spot_price_vector < self.barrier_down, 0, 1) * self.value_vector
+            elif self.knock_type == 'in':
+                self.value_vector = np.where(spot_price_vector < self.barrier_down, 1, 0) * self.value_vector
+        elif self.direction == 'double':
+            if self.knock_type == 'out':
+                self.value_vector = np.where(spot_price_vector > self.barrier_up, 0, 1) * np.where(spot_price_vector < self.barrier_down, 0, 1) * self.value_vector
+            elif self.knock_type == 'in':
+                self.value_vector = (1-(np.where(spot_price_vector > self.barrier_up, 0, 1) * np.where(spot_price_vector < self.barrier_down, 0, 1))) * self.value_vector
+                
+
+
+
+
 class AmericanVanillaFiniteDiff(FiniteDifference):
     '''
     finite difference pricing for american vanilla options
