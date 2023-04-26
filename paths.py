@@ -13,7 +13,9 @@ import abc
 import numpy as np
 import numpy.linalg as la
 import matplotlib.pyplot as plt
-
+from scipy.stats import norm
+import warnings
+warnings.filterwarnings("ignore")
 
 
 
@@ -31,6 +33,7 @@ class Path(metaclass=abc.ABCMeta):
         self.n_intervals = int(n_intervals)
         self.delta_time = maturity / self.n_intervals
 
+
     @abc.abstractmethod
     def generate_paths(self):
         '''
@@ -42,6 +45,7 @@ class Path(metaclass=abc.ABCMeta):
         self.price_paths = None
 
         return self.price_paths
+
 
     def plot_paths(self):
         '''
@@ -58,6 +62,7 @@ class Path(metaclass=abc.ABCMeta):
         plt.title('Sample Paths Plot')
             
         plt.show()
+
 
     def plot_hist(self):
         '''
@@ -116,6 +121,7 @@ class CEV(Path):
         return self.price_paths
 
 
+
 class Bachelier(CEV):
     '''
     generate simulated sample paths based on bachelier motion model
@@ -145,6 +151,7 @@ class GeoBrownianMotion(CEV):
         super().__init__(n_trials, n_intervals, **model_params)
 
 
+
 class OU(Path):
     '''
     generate simulated sample paths based on OU model
@@ -165,6 +172,7 @@ class OU(Path):
             raise NameError('Parameters input are wrong')
 
         super().__init__(n_trials, n_intervals, self.tau)
+
 
     def generate_paths(self):
         '''
@@ -203,6 +211,7 @@ class CIR(Path):
             raise NameError('Parameters input are wrong')
 
         super().__init__(n_trials, n_intervals, self.tau)
+
 
     def generate_paths(self):
         '''
@@ -244,6 +253,7 @@ class SABR(Path):
 
         super().__init__(n_trials, n_intervals, self.tau)
 
+
     def generate_paths(self):
         '''
         generate N * M array, N is the number of paths, M is the number of sampling intervals 
@@ -263,6 +273,8 @@ class SABR(Path):
             volatility_vector = volatility_vector + self.alpha*volatility_vector*np.sqrt(self.delta_time)*norm_delta1
             price_vector = price_vector + volatility_vector*(price_vector**self.beta)*np.sqrt(self.delta_time)*norm_delta2
             self.price_paths = np.concatenate([self.price_paths, price_vector], axis=1)
+
+        self.price_paths = np.delete(self.price_paths, 0, axis=1)
 
         return self.price_paths
 
@@ -291,6 +303,7 @@ class Heston(Path):
 
         super().__init__(n_trials, n_intervals, self.tau)
 
+
     def generate_paths(self):
         '''
         generate N * M array, N is the number of paths, M is the number of sampling intervals 
@@ -311,6 +324,8 @@ class Heston(Path):
             price_vector = price_vector + self.rate*price_vector*self.delta_time + np.sqrt(np.maximum(volatility_vector,0))*price_vector*np.sqrt(self.delta_time)*norm_delta2
 
             self.price_paths = np.concatenate([self.price_paths, price_vector], axis=1)
+
+        self.price_paths = np.delete(self.price_paths, 0, axis=1)
 
         return self.price_paths
 
@@ -426,6 +441,135 @@ class Bates(Path):
         self.price_paths = np.delete(self.price_paths, 0, axis=1)
 
         return self.price_paths
+
+
+
+
+
+class MultiPath(Path):
+    '''
+    multiple path generation base class
+    '''
+
+    def __init__(self, n_trials, n_intervals, maturity):
+        '''
+        intiaialize the model parameters
+        '''
+
+        self.n_trials = int(n_trials)
+        self.n_intervals = int(n_intervals)
+        self.delta_time = maturity / self.n_intervals
+
+
+    def plot_paths(self, index):
+        '''
+        plot the simulated paths for the ith asset
+        '''
+
+        assert index <= self.n_assets, 'The index of ith asset is greater than the number of assets'
+
+        self.generate_paths()
+
+        plt.figure(figsize=(20,10))
+
+        for i in range(self.price_paths.shape[1]):
+            plt.plot(self.price_paths[index-1,i,:])
+
+        plt.title('Sample Paths Plot for the {}th Spot Asset'.format(index))
+            
+        plt.show()
+
+    def plot_hist(self, index):
+        '''
+        plot the simulated paths histogram for the ith asset
+        '''
+
+        assert index <= self.n_assets, 'The index of ith asset is greater than the number of assets'
+
+        self.generate_paths()
+
+        plt.figure(figsize=(20,10))
+
+        plt.hist(self.price_paths[index-1,:,-1], bins=100)
+
+        plt.title('Sample Paths Histogram for the {}th Spot Asset'.format(index))
+            
+        plt.show()
+
+
+
+
+
+class MultiCEV(MultiPath):
+    '''
+    generate multiple simulated sample paths based on CEV motion model
+    '''
+
+    def __init__(self, n_trials, n_intervals, **model_params):
+        '''
+        intiaialize the model parameters
+        '''
+        
+        try:
+            self.rate = model_params['rate']  
+            self.tau = model_params['tau']
+            self.spot_price = np.array(model_params['spot_price'])
+            self.sigma = np.array(model_params['sigma'])
+            self.beta = np.array(model_params['beta'])
+            self.corr_matrix = list(model_params['corr_matrix'])
+        except:
+            raise NameError('Parameters input are wrong')
+        
+        assert len(self.spot_price) == len(self.beta) == len(self.sigma), 'The number of each parameter should all be qual to the number of assets'
+        self.n_assets = len(self.spot_price)
+
+        assert len(self.corr_matrix) == self.n_assets*(self.n_assets-1) / 2, 'The number of the correlations must correspond to the number of assets'
+        tri_corr_matrix = np.array([[0]*(i+1) + self.corr_matrix[((2*self.n_assets-(i+1))*i)//2:((2*self.n_assets-(i+1))*i)//2+self.n_assets-i-1] for i in range(self.n_assets)])
+        self.corr_matrix = tri_corr_matrix + tri_corr_matrix.T + np.eye(self.n_assets)
+
+        super().__init__(n_trials, n_intervals, self.tau)
+
+        
+    def generate_paths(self):
+        '''
+        generate K * N * M array, K is the number of assets, N is the number of paths, M is the number of sampling intervals 
+        '''
+
+        price_matrix = np.repeat(self.spot_price.reshape(self.n_assets, 1), self.n_trials, axis=1)
+        self.price_paths = np.expand_dims(price_matrix, axis=2)
+
+        corr_matrix = la.cholesky(self.corr_matrix)
+
+        for _ in range(self.n_intervals):
+            norm_delta = (np.random.randn(self.n_trials, self.n_assets) @ corr_matrix).reshape(self.n_trials, self.n_assets).T
+            price_matrix = price_matrix + self.rate*price_matrix*self.delta_time + (price_matrix**self.beta.reshape(self.n_assets, 1)) * self.sigma.reshape(self.n_assets, 1)*norm_delta*np.sqrt(self.delta_time)
+            self.price_paths = np.concatenate([self.price_paths, np.expand_dims(price_matrix, axis=2)], axis=2)
+
+        self.price_paths = np.delete(self.price_paths, 0, axis=2)
+
+        return self.price_paths
+
+
+
+
+
+class MultiGeoBrownianMotion(MultiCEV):
+    '''
+    generate multiple simulated sample paths based on geometric brownian motion model
+    '''
+
+    def __init__(self, n_trials, n_intervals, **model_params):
+        '''
+        intiaialize the model parameters
+        '''
+
+        try:
+            model_params['beta'] = [1] * len(model_params['spot_price'])
+        except:
+            raise NameError('Parameters input are wrong')
+        
+        super().__init__(n_trials, n_intervals, **model_params)
+
 
 
 
