@@ -7,7 +7,7 @@ Introduction : This file covers the fundamental pricing approaches for different
 The monte carlo simulation approach, binominal trees approach and finite difference approach has been
 introduced into pricing. The monte carlo approach allows user to select different underlying dynamics
 in paths.py to generate paths. Futhermore, this file also contains the pricing approaches for some popular 
-OTC derivatives such as snow ball product.
+OTC derivatives in China's market such as snow ball product.
 '''
 
 import abc
@@ -229,7 +229,9 @@ class MonteCarloSim(Price):
             SABR, 
             Heston,
             Merton,
-            Bates]
+            Bates,            
+            MultiCEV, 
+            MultiGeoBrownianMotion]
         assert model in model_types_list, 'Selcet an available model type'
 
         self.n_trials = n_trials
@@ -287,7 +289,7 @@ class MonteCarloSim(Price):
         '''
 
         try:
-            return np.std(self.payoff_vector)
+            return np.std(self.price_process[:,-1])
         except:
             raise ValueError('There is no payoff which is computed')
 
@@ -416,6 +418,7 @@ class EuropeanVanillaSim(MonteCarloSim):
 
 
 
+
 class EuropeanBarrierSim(MonteCarloSim):
     '''
     monte carlo simulation for european barrier options
@@ -482,6 +485,7 @@ class EuropeanBarrierSim(MonteCarloSim):
                 indicator_matrix = np.array(np.max(self.price_process,axis=1) < self.barrier_up, dtype=int) * np.array(np.min(self.price_process,axis=1) > self.barrier_down, dtype=int)
             elif self.knock_type == 'in':
                 indicator_matrix = 1-((1-np.array(np.max(self.price_process,axis=1) >= self.barrier_up, dtype=int)) * (1-np.array(np.min(self.price_process,axis=1) <= self.barrier_down, dtype=int)))
+                #indicator_matrix = np.array(np.max(self.price_process,axis=1) >= self.barrier_up, dtype=int) * np.array(np.min(self.price_process,axis=1) <= self.barrier_down, dtype=int)
 
         if self.option_type == 'call':
             relu_func = np.frompyfunc(lambda x:x-self.strike if x-self.strike >= 0 else 0,1,1)
@@ -574,6 +578,7 @@ class EuropeanAsianSim(MonteCarloSim):
         strike,
         option_type='call',
         ave_type='arith', 
+        #observe_days=None,
         model=GeoBrownianMotion, 
         **model_params):
         '''
@@ -585,10 +590,10 @@ class EuropeanAsianSim(MonteCarloSim):
         assert option_type.lower() in ('call', 'put'), 'The option type must be call or put'
         assert ave_type.lower() in ('arith', 'geo'), 'The average type must be arithmetic or geometric'
 
-        self.rate = model_params['rate']
         self.strike = strike
         self.option_type = option_type
         self.ave_type = ave_type
+
 
 
     @MonteCarloSim.generate_paths
@@ -638,7 +643,7 @@ class EuropeanBinarySim(MonteCarloSim):
 
         assert option_type.lower() in ('call', 'put'), 'The option type must be call or put'
 
-        self.rate = model_params['rate']
+        #self.rate = model_params['rate']
         self.strike = strike
         self.option_type = option_type
 
@@ -662,6 +667,55 @@ class EuropeanBinarySim(MonteCarloSim):
 
 
 
+
+class EuropeanGapSim(MonteCarloSim):
+    '''
+    monte carlo simulation for european gap options
+    '''
+
+    def __init__(
+        self, 
+        init_price,
+        maturity, 
+        n_trials,
+        nper_per_year, 
+        strike1,
+        strike2,
+        option_type='call', 
+        model=GeoBrownianMotion,
+        **model_params):
+        '''
+        intiaialize the structure parameters
+        '''
+
+        super().__init__(init_price, maturity, n_trials, nper_per_year, model, **model_params)
+
+        assert option_type.lower() in ('call', 'put'), 'The option type must be call or put'
+
+        self.strike1 = strike1
+        self.strike2 = strike2
+        self.option_type = option_type
+
+
+    @MonteCarloSim.generate_paths
+    def value(self):
+        '''
+        valuation of the derivative
+        '''
+
+        if self.option_type == 'call':
+            relu_func = np.frompyfunc(lambda x:x-self.strike1 if x-self.strike2 >= 0 else 0,1,1)
+        elif self.option_type == 'put':
+            relu_func = np.frompyfunc(lambda x:self.strike1-x if self.strike2-x >= 0 else 0,1,1)
+
+        self.payoff_vector = relu_func(self.price_process[:,-1])
+        simulated_price = np.exp(-self.rate*self.tau) * np.mean(self.payoff_vector)
+
+        return simulated_price
+
+
+
+
 class ChooserSim(MonteCarloSim):
     '''
     monte carlo simulation for chooser options
@@ -673,7 +727,7 @@ class ChooserSim(MonteCarloSim):
         maturity, 
         n_trials, 
         nper_per_year, 
-        strike, 
+        strike,
         choose_time,
         model=GeoBrownianMotion, 
         **model_params):
@@ -687,7 +741,7 @@ class ChooserSim(MonteCarloSim):
 
         self.strike = strike
         self.choose_time = choose_time
-        self.choose_index = int(choose_time*self.n_intervals)
+        self.choose_index = round(choose_time*self.n_intervals)
 
 
     @MonteCarloSim.generate_paths
@@ -700,6 +754,99 @@ class ChooserSim(MonteCarloSim):
         relu_put_func = np.frompyfunc(lambda x:self.strike-x if self.strike-x >= 0 else 0,1,1)
 
         self.payoff_vector = np.exp(-self.rate*self.tau)*relu_call_func(self.price_process[:,-1]) + np.exp(-self.rate*self.choose_time*self.tau)*relu_put_func(self.price_process[:,self.choose_index])
+        simulated_price = np.mean(self.payoff_vector)
+
+        return simulated_price
+
+
+
+
+
+class ForwardStartSim(MonteCarloSim):
+    '''
+    monte carlo simulation for forward start options
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        n_trials, 
+        nper_per_year, 
+        start_time,
+        option_type='call', 
+        model=GeoBrownianMotion, 
+        **model_params):
+        '''
+        intiaialize the structure parameters
+        '''
+
+        super().__init__(init_price, maturity, n_trials, nper_per_year, model, **model_params)
+
+        assert 0 < start_time < 1, 'The forward start time must be between 0 and 1'
+
+        self.start_time = start_time
+        self.start_index = round(start_time*self.n_intervals)
+        self.option_type = option_type
+
+
+    @MonteCarloSim.generate_paths
+    def value(self):
+        '''
+        valuation of the derivative
+        '''
+        if self.option_type == 'call':
+            self.payoff_vector = np.exp(-self.rate*self.tau)*np.maximum(self.price_process[:,-1]-self.price_process[:,self.start_index],0) 
+        elif self.option_type == 'put':
+            self.payoff_vector = np.exp(-self.rate*self.tau)*np.maximum(self.price_process[:,self.start_index]-self.price_process[:,-1],0) 
+
+        simulated_price = np.mean(self.payoff_vector)
+
+        return simulated_price
+
+
+
+
+
+class CliquetSim(MonteCarloSim):
+    '''
+    monte carlo simulation for cliquet options
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        n_trials, 
+        nper_per_year, 
+        n_contracts,
+        option_type='call',
+        model=GeoBrownianMotion, 
+        **model_params):
+        '''
+        intiaialize the structure parameters
+        '''
+
+        super().__init__(init_price, maturity, n_trials, nper_per_year, model, **model_params)
+
+        self.n_contracts = n_contracts
+        self.start_indices = [round((i/self.n_contracts)*self.n_intervals) for i in range(self.n_contracts)]
+        self.option_type = option_type
+
+
+    @MonteCarloSim.generate_paths
+    def value(self):
+        '''
+        valuation of the derivative
+        '''
+
+        price_process_ = np.concatenate([self.spot_price*np.ones((self.n_trials,1)), self.price_process], axis=1)
+
+        if self.option_type == 'call':
+            self.payoff_vector = np.sum(np.exp(-self.rate*self.tau*np.array(self.start_indices[1:]+[1]).reshape(1,self.n_contracts))*np.maximum(np.diff(np.concatenate([price_process_[:,self.start_indices].reshape(self.n_trials, self.n_contracts), self.price_process[:,-1].reshape(self.n_trials, 1)], axis=1),axis=1),0), axis=1)
+        elif self.option_type == 'put':
+            self.payoff_vector = np.sum(np.exp(-self.rate*self.tau*np.array(self.start_indices[1:]+[1]).reshape(1,self.n_contracts))*np.maximum(-np.diff(np.concatenate([price_process_[:,self.start_indices].reshape(self.n_trials, self.n_contracts), self.price_process[:,-1].reshape(self.n_trials, 1)], axis=1),axis=1),0), axis=1)
+
         simulated_price = np.mean(self.payoff_vector)
 
         return simulated_price
@@ -1193,6 +1340,9 @@ class BoosterSim(SnowBallSim):
 
 
 
+
+
+
 class BinomialTree(Price):
     '''
     binomial tree pricing model base class
@@ -1250,6 +1400,8 @@ class BinomialTree(Price):
 
         if n_iter > 1:
 
+            self.n_iter = n_iter
+
             derivative_value = np.exp(-(self.rate-self.dividend)*self.delta_time) * (self.p_tilde*self.recursion(n_iter-1, self.u*spot_price) + self.q_tilde*self.recursion(n_iter-1, self.d*spot_price))
             updated_value = self.on_path_update(spot_price, derivative_value)
 
@@ -1260,6 +1412,7 @@ class BinomialTree(Price):
 
         else:
             return self.payoff(spot_price)
+
 
     def value(self):
         '''
@@ -1478,39 +1631,13 @@ class ShoutBinomial(BinomialTree):
         update the derivatives prices on each node
         '''
 
-        if self.option_type == 'call' and spot_price - self.strike > derivative_value:
-            return spot_price - self.strike
-        elif self.option_type == 'put' and self.strike - spot_price > derivative_value:
-            return self.strike - spot_price
+        if self.option_type == 'call':
+            return np.maximum(black_scholes(spot_price, spot_price, self.rate, self.sigma, (self.n_intervals-self.n_iter)*self.delta_time, self.option_type) + np.exp(-self.rate*((self.n_intervals-self.n_iter)*self.delta_time))*(spot_price - self.strike), derivative_value)
+        elif self.option_type == 'put':
+            return np.maximum(black_scholes(spot_price, spot_price, self.rate, self.sigma, (self.n_intervals-self.n_iter)*self.delta_time, self.option_type) - np.exp(-self.rate*((self.n_intervals-self.n_iter)*self.delta_time))*(spot_price + self.strike), derivative_value)
         else:
             return None
 
-
-    def recursion(self, n_iter, spot_price):
-        '''
-        binomial tree recursion algorithm
-        '''
-
-        if n_iter > 1:
-
-            derivative_value = (self.p_tilde*self.recursion(n_iter-1, self.u*spot_price) + self.q_tilde*self.recursion(n_iter-1, self.d*spot_price))
-            updated_value = self.on_path_update(spot_price, derivative_value)
-
-            if updated_value != None:
-                return updated_value
-            else:
-                return derivative_value
-
-        else:
-            return self.payoff(spot_price)
-
-
-    def value(self):
-        '''
-        valuation of the derivative
-        '''
-
-        return np.exp(-(self.rate-self.dividend)*self.tau) * self.recursion(self.n_intervals, self.spot_price)
 
 
 
@@ -1813,9 +1940,10 @@ class EuropeanVanillaFiniteDiff(FiniteDifference):
         elif self.option_type == 'put':
             return self.strike - spot_price if spot_price - self.strike < 0 else 0
 
+
     def boundary_value(self, boundary_type, time_i):
         '''
-        define the terminal payoff for a certain derivative
+        define the boundary condition for a certain derivative 
         '''
 
         if self.option_type == 'call':
@@ -1987,14 +2115,303 @@ class EuropeanBarrierFiniteDiff(FiniteDifference):
                 self.value_vector = np.where(spot_price_vector > self.barrier_up, 0, 1) * np.where(spot_price_vector < self.barrier_down, 0, 1) * self.value_vector
             elif self.knock_type == 'in':
                 self.value_vector = (1-(np.where(spot_price_vector > self.barrier_up, 0, 1) * np.where(spot_price_vector < self.barrier_down, 0, 1))) * self.value_vector
-                
 
 
 
 
-class AmericanVanillaFiniteDiff(FiniteDifference):
+
+class EuropeanCallSpreadFiniteDiff(FiniteDifference):
+    '''
+    finite difference pricing for european call spreads
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        rate, 
+        sigma, 
+        s_max, 
+        nper_per_year, 
+        n_price_intervals, 
+        strike1, 
+        strike2, 
+        dividend=0):
+        '''
+        intiaialize the model parameters
+        '''
+
+        super().__init__(init_price, maturity, rate, sigma, s_max, nper_per_year, n_price_intervals, dividend)
+
+
+        assert strike2 > strike1, 'In call spread, the strike of the short side must be greater than the strike of the long side'
+        self.strike1 = strike1
+        self.strike2 = strike2
+
+
+    def payoff(self, spot_price):
+        '''
+        define the terminal payoff of a certain derivative
+        '''
+
+        return max(spot_price - self.strike1 ,0) - max(spot_price - self.strike2 ,0)
+    
+    
+    def boundary_value(self, boundary_type, time_i):
+        '''
+        define the boundary condition for a certain derivative 
+        '''
+
+        if boundary_type == 'up':
+            return (self.strike2-self.strike1)*np.exp(-self.rate*(self.tau-time_i*self.delta_time))
+        elif boundary_type == 'low':
+            return 0
+
+
+
+
+
+class EuropeanPutSpreadFiniteDiff(FiniteDifference):
+    '''
+    finite difference pricing for european put spreads
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        rate, 
+        sigma, 
+        s_max, 
+        nper_per_year, 
+        n_price_intervals, 
+        strike1, 
+        strike2, 
+        dividend=0):
+        '''
+        intiaialize the model parameters
+        '''
+
+        super().__init__(init_price, maturity, rate, sigma, s_max, nper_per_year, n_price_intervals, dividend)
+
+
+        assert strike2 > strike1, 'In put spread, the strike of the long side must be greater than the strike of the short side'
+        self.strike1 = strike1
+        self.strike2 = strike2
+
+
+    def payoff(self, spot_price):
+        '''
+        define the terminal payoff of a certain derivative
+        '''
+
+        return max(self.strike2 - spot_price ,0) - max(self.strike1 - spot_price,0)
+    
+    
+    def boundary_value(self, boundary_type, time_i):
+        '''
+        define the boundary condition for a certain derivative 
+        '''
+
+        if boundary_type == 'up':
+            return 0
+        elif boundary_type == 'low':
+            return (self.strike2-self.strike1)*np.exp(-self.rate*(self.tau-time_i*self.delta_time))
+
+
+
+
+
+class EuropeanButterflyFiniteDiff(FiniteDifference):
+    '''
+    finite difference pricing for european butterfly
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        rate, 
+        sigma, 
+        s_max, 
+        nper_per_year, 
+        n_price_intervals, 
+        middle_strike, 
+        delta_strike, 
+        dividend=0):
+        '''
+        intiaialize the model parameters
+        '''
+
+        super().__init__(init_price, maturity, rate, sigma, s_max, nper_per_year, n_price_intervals, dividend)
+
+
+        self.strike1 = middle_strike + delta_strike/2
+        self.strike2 = middle_strike
+        self.strike3 = middle_strike - delta_strike/2
+
+
+    def payoff(self, spot_price):
+        '''
+        define the terminal payoff of a certain derivative
+        '''
+
+        return max(spot_price - self.strike1 ,0) + max(spot_price - self.strike3 ,0) - 2*max(spot_price - self.strike2 ,0)
+
+
+    def boundary_value(self, boundary_type, time_i):
+        '''
+        define the boundary condition for a certain derivative 
+        '''
+
+        return 0
+
+
+
+
+
+class EuropeanStraddleFiniteDiff(FiniteDifference):
+    '''
+    finite difference pricing for european straddle
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        rate, 
+        sigma, 
+        s_max, 
+        nper_per_year, 
+        n_price_intervals, 
+        strike, 
+        dividend=0):
+        '''
+        intiaialize the model parameters
+        '''
+
+        super().__init__(init_price, maturity, rate, sigma, s_max, nper_per_year, n_price_intervals, dividend)
+
+        self.strike = strike
+
+
+    def payoff(self, spot_price):
+        '''
+        define the terminal payoff of a certain derivative
+        '''
+
+        return max(spot_price - self.strike ,0) + max(self.strike - spot_price, 0)
+
+
+    def boundary_value(self, boundary_type, time_i):
+        '''
+        define the boundary condition for a certain derivative 
+        '''
+
+        if boundary_type == 'up':
+            return self.s_max - self.strike*np.exp(-self.rate*(self.tau-time_i*self.delta_time))
+        elif boundary_type == 'low':
+            return self.strike*np.exp(-self.rate*(self.tau-time_i*self.delta_time))
+
+
+
+
+
+class EuropeanStrangleFiniteDiff(FiniteDifference):
+    '''
+    finite difference pricing for european strangle
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        rate, 
+        sigma, 
+        s_max, 
+        nper_per_year, 
+        n_price_intervals, 
+        strike1, 
+        strike2,
+        dividend=0):
+        '''
+        intiaialize the model parameters
+        '''
+
+        super().__init__(init_price, maturity, rate, sigma, s_max, nper_per_year, n_price_intervals, dividend)
+
+
+        assert strike1 < strike2, 'In a strangle, the strike of the put option must be less than the strike of call option'
+        self.strike1 = strike1
+        self.strike2 = strike2
+
+
+    def payoff(self, spot_price):
+        '''
+        define the terminal payoff of a certain derivative
+        '''
+
+        return max(spot_price - self.strike2 ,0) + max(self.strike1 - spot_price, 0)
+
+
+    def boundary_value(self, boundary_type, time_i):
+        '''
+        define the boundary condition for a certain derivative 
+        '''
+
+        if boundary_type == 'up':
+            return self.s_max - self.strike2*np.exp(-self.rate*(self.tau-time_i*self.delta_time))
+        elif boundary_type == 'low':
+            return self.strike1*np.exp(-self.rate*(self.tau-time_i*self.delta_time))
+
+
+
+
+
+
+class AmericanVanillaFiniteDiff(EuropeanVanillaFiniteDiff):
     '''
     finite difference pricing for american vanilla options
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        rate, 
+        sigma, 
+        s_max, 
+        nper_per_year, 
+        n_price_intervals, 
+        strike, 
+        option_type='call', 
+        dividend=0):
+        '''
+        intiaialize the model parameters
+        '''
+
+        super().__init__(init_price, maturity, rate, sigma, s_max, nper_per_year, n_price_intervals, strike, option_type, dividend)
+
+
+    def on_path_update(self):
+        '''
+        update the derivatives prices on each node
+        '''
+
+        spot_price_vector = np.array([[(j+1)*self.delta_s for j in range(self.n_price_intervals)]]).T
+
+        if self.option_type == 'call':
+            self.value_vector = np.maximum(spot_price_vector - self.strike, self.value_vector)
+        elif self.option_type == 'put':
+            self.value_vector = np.maximum(self.strike - spot_price_vector, self.value_vector)
+
+
+
+
+
+class AmericanBinaryFiniteDiff(FiniteDifference):
+    '''
+    finite difference pricing for american binary options
     '''
 
     def __init__(
@@ -2020,32 +2437,33 @@ class AmericanVanillaFiniteDiff(FiniteDifference):
         self.strike = strike
         self.option_type = option_type
 
+
     def payoff(self, spot_price):
         '''
         define the terminal payoff of a certain derivative
         '''
 
         if self.option_type == 'call':
-            return spot_price - self.strike if spot_price - self.strike > 0 else 0
+            return 1 if spot_price - self.strike > 0 else 0
         elif self.option_type == 'put':
-            return self.strike - spot_price if spot_price - self.strike < 0 else 0
+            return 1 if spot_price - self.strike < 0 else 0
 
 
     def boundary_value(self, boundary_type, time_i):
         '''
-        define the terminal payoff for a certain derivative
+        define the boundary condition for a certain derivative 
         '''
 
         if self.option_type == 'call':
             if boundary_type == 'up':
-                return self.s_max - self.strike*np.exp(-self.rate*(self.tau-time_i*self.delta_time))
+                return np.exp(-self.rate*(self.tau-time_i*self.delta_time))
             elif boundary_type == 'low':
                 return 0
         elif self.option_type == 'put':
             if boundary_type == 'up':
                 return 0
             elif boundary_type == 'low':
-                return self.strike*np.exp(-self.rate*(self.tau-time_i*self.delta_time))
+                return np.exp(-self.rate*(self.tau-time_i*self.delta_time))
 
 
     def on_path_update(self):
@@ -2056,11 +2474,46 @@ class AmericanVanillaFiniteDiff(FiniteDifference):
         spot_price_vector = np.array([[(j+1)*self.delta_s for j in range(self.n_price_intervals)]]).T
 
         if self.option_type == 'call':
-            self.value_vector = np.maximum(spot_price_vector - self.strike, self.value_vector)
+            self.value_vector = np.maximum(np.where(spot_price_vector >= self.strike, 1, 0), self.value_vector)
         elif self.option_type == 'put':
-            self.value_vector = np.maximum(self.strike - spot_price_vector, self.value_vector)
+            self.value_vector = np.maximum(np.where(spot_price_vector <= self.strike, 1, 0), self.value_vector)
 
-    
+
+
+class AmericanCallSpreadFiniteDiff(EuropeanCallSpreadFiniteDiff):
+    '''
+    finite difference pricing for american call spreads
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        rate, 
+        sigma, 
+        s_max, 
+        nper_per_year, 
+        n_price_intervals, 
+        strike1, 
+        strike2, 
+        dividend=0):
+        '''
+        intiaialize the model parameters
+        '''
+
+        super().__init__(init_price, maturity, rate, sigma, s_max, nper_per_year, n_price_intervals, strike1, strike2, dividend)
+
+
+    def on_path_update(self):
+        '''
+        update the derivatives prices on each node
+        '''
+
+        spot_price_vector = np.array([[(j+1)*self.delta_s for j in range(self.n_price_intervals)]]).T
+
+        self.value_vector = np.maximum(np.maximum(spot_price_vector - self.strike1, 0) - np.maximum(spot_price_vector - self.strike2, 0), self.value_vector)
+
+
 
 
 
@@ -2076,7 +2529,7 @@ class LeastSquaredMonteCarloSim(MonteCarloSim):
         n_trials,
         nper_per_year, 
         regression_model,
-        fetures_degree,
+        features_degree,
         model, 
         **model_params):
         '''
@@ -2106,27 +2559,11 @@ class LeastSquaredMonteCarloSim(MonteCarloSim):
             GradientBoostingRegressor,
             BaggingRegressor]
         assert regression_model in regression_model_list, 'Please select an available regression model'
-        assert isinstance(fetures_degree, int) and fetures_degree >= 1, 'Number of fetures must be integer and no less than 1'
+        assert isinstance(features_degree, int) and features_degree >= 1, 'Number of fetures must be integer and no less than 1'
 
         self.regression_model = regression_model
-        self.fetures_degree = fetures_degree
+        self.features_degree = features_degree
         self.delta_time = 1 / nper_per_year
-
-
-    def generate_paths(func):
-        '''
-        paths generate decorator, the overwritten value method must be decorated by this decorator
-        in order to generate paths again when the parameters may be changed
-        '''
-
-        def wrapper(self):
-
-            path = self.model(self.n_trials, self.n_intervals, **self.model_params)
-            self.price_process = path.generate_paths()
-
-            return func(self)
-
-        return wrapper
 
 
     @abc.abstractmethod
@@ -2146,7 +2583,7 @@ class LeastSquaredMonteCarloSim(MonteCarloSim):
         return None
 
 
-    @generate_paths
+    @MonteCarloSim.generate_paths
     def value(self):
         '''
         valuation of the derivative
@@ -2158,13 +2595,14 @@ class LeastSquaredMonteCarloSim(MonteCarloSim):
 
             itm_index = self.itm_path_index(-i-2)
             if len(itm_index) < 1:
-                self.exercise_matrix = np.concatenate([np.array([0]*self.n_trials).reshape(len(exercise_vector),1), self.exercise_matrix], axis=1)
+                self.exercise_matrix = np.concatenate([np.array([0]*self.n_trials).reshape(self.n_trials,1), self.exercise_matrix], axis=1)
+                continue
 
             itm_paths = self.price_process[itm_index].reshape(len(itm_index), self.n_intervals)
             dis_cash_flow = np.exp(-self.rate*self.delta_time)*(self.payoff(-i-1)[np.array(itm_index)])           
 
             reg_X = np.ones((len(itm_index), 1))
-            for j in range(self.fetures_degree):
+            for j in range(self.features_degree):
                 reg_X = np.concatenate([reg_X, np.array([[x_value**(j+1) for x_value in itm_paths[:,-i-2]]]).T], axis=1)
 
             regressor = self.regression_model().fit(reg_X, dis_cash_flow)
@@ -2203,7 +2641,7 @@ class AmericanVanillaLSMC(LeastSquaredMonteCarloSim):
         strike,
         option_type='put', 
         regression_model=LinearRegression,
-        fetures_degree=2,
+        features_degree=2,
         model=GeoBrownianMotion,
         **model_params):
         '''
@@ -2212,7 +2650,7 @@ class AmericanVanillaLSMC(LeastSquaredMonteCarloSim):
 
         assert option_type.lower() in ('call', 'put'), 'The option type must be call or put'
 
-        super().__init__(init_price, maturity, n_trials, nper_per_year, regression_model, fetures_degree, model, **model_params)
+        super().__init__(init_price, maturity, n_trials, nper_per_year, regression_model, features_degree, model, **model_params)
 
         self.rate = model_params['rate']
         self.strike = strike
@@ -2264,7 +2702,7 @@ class AmericanAsianLSMC(LeastSquaredMonteCarloSim):
         option_type='put',
         ave_type='arith',
         regression_model=LinearRegression,
-        fetures_degree=2,
+        features_degree=2,
         model=GeoBrownianMotion,
         **model_params):
         '''
@@ -2274,7 +2712,7 @@ class AmericanAsianLSMC(LeastSquaredMonteCarloSim):
         assert option_type.lower() in ('call', 'put'), 'The option type must be call or put'
         assert ave_type.lower() in ('arith', 'geo'), 'The average type must be arithmetic or geometric'
 
-        super().__init__(init_price, maturity, n_trials, nper_per_year, regression_model, fetures_degree, model, **model_params)
+        super().__init__(init_price, maturity, n_trials, nper_per_year, regression_model, features_degree, model, **model_params)
 
         self.rate = model_params['rate']
         self.strike = strike
@@ -2319,6 +2757,114 @@ class AmericanAsianLSMC(LeastSquaredMonteCarloSim):
                 return np.argwhere(np.mean(self.price_process[:,:time_i], axis=1) < self.strike)
             elif self.ave_type == 'geo':
                 return np.argwhere(np.exp(np.mean(np.log(self.price_process[:,:time_i]), axis=1)) < self.strike)   
+
+
+
+
+
+class AmericanBarrierLSMC(LeastSquaredMonteCarloSim):
+    '''
+    least squared monte carlo simulation for american barrier options
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        n_trials, 
+        nper_per_year,
+        strike,
+        barrier_up=None, 
+        barrier_down=None,
+        option_type='put', 
+        knock_type='out', 
+        direction='up',  
+        regression_model=LinearRegression,
+        features_degree=2,
+        model=GeoBrownianMotion,
+        **model_params):
+        '''
+        intiaialize the structure parameters
+        '''
+
+        super().__init__(init_price, maturity, n_trials, nper_per_year, regression_model, features_degree, model, **model_params)
+
+        assert option_type.lower() in ('call', 'put'), 'The option type must be call or put'
+        assert knock_type.lower() in ('in', 'out'), 'Knock type must be in or out'
+        assert direction.lower() in ('up', 'down', 'double'), 'Direction type must be up or down or double'
+        if direction == 'up':
+            assert barrier_up != None, 'Please input an upward barrier'
+        elif direction == 'down':
+            assert barrier_down != None, 'Please input a downward barrier'
+        elif direction == 'double':
+            assert barrier_up != None and barrier_down != None, 'Please input both an upward barrier and a downward barrier'
+
+        self.rate = model_params['rate']
+        self.strike = strike
+        self.option_type = option_type
+        self.knock_type = knock_type
+        self.direction = direction
+        self.barrier_up = init_price*barrier_up
+        self.barrier_down = init_price*barrier_down
+
+
+    def payoff(self, time_i=None):
+        '''
+        define the exercise payoff for a certain derivative
+        '''
+
+        if self.option_type == 'call':
+            relu_func = np.frompyfunc(lambda x:x-self.strike if x-self.strike >= 0 else 0,1,1)
+        elif self.option_type == 'put':
+            relu_func = np.frompyfunc(lambda x:self.strike-x if self.strike-x >= 0 else 0,1,1)
+
+        if self.direction == 'up':
+            if self.knock_type == 'out':
+                indicator_func = np.frompyfunc(lambda x:1 if x < self.barrier_up else 0,1,1)
+            elif self.knock_type == 'in':
+                indicator_func = np.frompyfunc(lambda x:1 if x > self.barrier_up else 0,1,1)
+        elif self.direction == 'down':
+            if self.knock_type == 'out':
+                indicator_func = np.frompyfunc(lambda x:1 if x > self.barrier_down else 0,1,1)
+            elif self.knock_type == 'in':
+                indicator_func = np.frompyfunc(lambda x:1 if x < self.barrier_down else 0,1,1)
+        elif self.direction == 'double':
+            if self.knock_type == 'out':
+                indicator_func = np.frompyfunc(lambda x:1 if x < self.barrier_up and x > self.barrier_down else 0,1,1)
+            elif self.knock_type == 'in':
+                indicator_func = np.frompyfunc(lambda x:1 if x > self.barrier_up or x < self.barrier_down else 0,1,1)
+
+        if time_i != None:
+            return relu_func(self.price_process[:,time_i]) * indicator_func(self.price_process[:,time_i])
+        else:
+            return relu_func(self.price_process) * indicator_func(self.price_process)
+        
+
+    def itm_path_index(self, time_i):
+        '''
+        filter the in the money paths
+        '''
+
+        if self.direction == 'up':
+            if self.knock_type == 'out':
+                valid_paths = np.argwhere(self.price_process[:,time_i] < self.barrier_up)
+            elif self.knock_type == 'in':
+                valid_paths = np.argwhere(self.price_process[:,time_i] > self.barrier_up)
+        if self.direction == 'dowm':
+            if self.knock_type == 'out':
+                valid_paths = np.argwhere(self.price_process[:,time_i] > self.barrier_down)
+            elif self.knock_type == 'in':
+                valid_paths = np.argwhere(self.price_process[:,time_i] < self.barrier_down)
+        if self.direction == 'double':
+            if self.knock_type == 'out':
+                valid_paths = np.intersect1d(np.argwhere(self.price_process[:,time_i] < self.barrier_up), np.argwhere(self.price_process[:,time_i] > self.barrier_down))
+            elif self.knock_type == 'in':
+                valid_paths = np.union1d(np.argwhere(self.price_process[:,time_i] > self.barrier_up), np.argwhere(self.price_process[:,time_i] < self.barrier_down))          
+
+        if self.option_type == 'call':
+            return np.intersect1d(np.argwhere(self.price_process[:,time_i] > self.strike), valid_paths)
+        elif self.option_type == 'put':
+            return np.intersect1d(np.argwhere(self.price_process[:,time_i] < self.strike), valid_paths)
 
 
 
@@ -2469,4 +3015,204 @@ class EuropeanVanillaQuadrature(Quadrature):
 
 
 
+
+class CarrMadan(Price):
+    '''
+    carr madan method base class
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        rate,
+        alpha,
+        strike,
+        structure_type, 
+        option_type):
+        '''
+        intiaialize the class parameters
+        '''
+
+        super().__init__(init_price, maturity)
+
+        assert structure_type.lower() in ('vanilla', 'binary'), 'The option structure type must be Vanilla or Binary'
+        assert option_type.lower() in ('call', 'put'), 'The option type must be call or put'
+        if option_type == 'call':
+            assert alpha > 0, 'The damping facotr in fourier transform for call options must be greater than 0'
+        elif option_type == 'put':
+            assert alpha < 0, 'The damping facotr in fourier transform for put options must be less than 0'
+    
+        self.structure_type = structure_type
+        self.option_type = option_type
+        self.rate = rate
+        self.alpha = alpha
+        self.strike = strike
+
+
+    @abc.abstractmethod
+    def character_func(self, u):
+        '''
+        characteristic function
+        '''
+
+        return None
+    
+
+    def psi_func(self, v):
+        '''
+        psi function
+        '''
+
+        im_i = complex(0,1)
+
+        if self.structure_type == 'vanilla':
+            psi_value = np.exp(-self.rate*self.tau)*self.character_func(v-(self.alpha+1)*im_i) / ((self.alpha+im_i*v)*(self.alpha+im_i*v+1))
+        elif self.structure_type == 'binary':      
+            psi_value = -np.exp(-self.rate*self.tau)*self.character_func(v-self.alpha*im_i) / (self.alpha+im_i*v)
+
+        return np.real(psi_value)
+    
+
+    def quad(self):
+        '''
+        quadrature function
+        '''
+
+        im_i = complex(0,1)
+
+        B_int = 50
+        N_int = 200
+        k = np.log(self.strike)
+
+        int_sum = 0
+        delta_v = B_int/N_int
+
+        for i in range(N_int):
+
+            v_i = i*delta_v
+            v_ip1 = (i+1)*delta_v
+
+            int_sum += 0.5 * ((np.exp(-im_i*v_i*k))*self.psi_func(v_i) + (np.exp(-im_i*v_ip1*k))*self.psi_func(v_ip1)) * delta_v
+
+
+        return int_sum
+
+
+    def value(self):
+        '''
+        valuation of the derivative
+        '''
+
+        im_i = complex(0,1)
+
+        B_int = 50
+        N_int = 200
+        k = np.log(self.strike)
+
+        int_sum = 0
+        delta_v = B_int/N_int
+
+        for i in range(N_int):
+
+            v_i = i*delta_v
+            v_ip1 = (i+1)*delta_v
+            int_sum += 0.5 * ((np.exp(-im_i*v_i*k))*self.psi_func(v_i) + (np.exp(-im_i*v_ip1*k))*self.psi_func(v_ip1)) * delta_v   
+
+        price_value = (np.exp(-self.alpha*np.log(self.strike))/np.pi) * int_sum      #self.quad()
+
+        return  np.real(price_value)
+    
+
+
+
+
+class BachelierCarrMadan(CarrMadan):
+    '''
+    carr madan method under bachelier model
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        rate,
+        alpha,
+        sigma,
+        strike,
+        structure_type='vanilla', 
+        option_type='call'):
+        '''
+        intiaialize the class parameters
+        '''
+
+        super().__init__(init_price, maturity, rate, alpha, strike, structure_type, option_type)
+
+        self.sigma = sigma
+
+
+    def character_func(self, u):
+        '''
+        characteristic function
+        ''' 
+
+        im_i = complex(0,1)
+
+        phi_value = np.exp(im_i*u*self.spot_price*np.exp(self.rate*self.tau) - (self.sigma**2*(np.exp(2*self.rate*self.tau)-1)*u**2)/(4*self.rate))
+
+        return phi_value
+
+
+
+
+class HestonCarrMadan(CarrMadan):
+    '''
+    carr madan method under heston model
+    '''
+
+    def __init__(
+        self, 
+        init_price, 
+        maturity, 
+        rate,
+        alpha,
+        initialized_volatility, 
+        kappa,
+        theta,
+        xi,
+        rho,
+        strike,
+        structure_type='vanilla', 
+        option_type='call'):
+        '''
+        intiaialize the class parameters
+        '''
+
+        super().__init__(init_price, maturity, rate, alpha, strike, structure_type, option_type)
+
+        self.initialized_volatility = initialized_volatility
+        self.kappa = kappa
+        self.theta = theta
+        self.xi = xi
+        self.rho = rho
+
+
+    def character_func(self, u):
+        '''
+        characteristic function
+        '''
+
+        im_i = complex(0,1)
+        lambda_ = np.sqrt(self.xi**2*(u**2+im_i*u)+(self.kappa-im_i*self.rho*self.xi*u)**2)
+
+        def omega(u):
+
+            omega_value = np.exp(im_i*u*np.log(self.spot_price)+im_i*u*self.rate*self.tau+(self.kappa*self.theta*self.tau*(self.kappa-im_i*self.rho*self.xi*u))/(self.xi**2)) / (np.cosh(0.5*lambda_*self.tau) + ((self.kappa-im_i*self.rho*self.xi*u)/lambda_)*np.sinh(0.5*lambda_*self.tau))**((2*self.kappa*self.theta)/(self.xi**2))
+
+            return omega_value
+        
+        phi_value = omega(u) * np.exp((-(u**2+im_i*u)*self.initialized_volatility) / (lambda_/np.tanh(0.5*lambda_*self.tau)+(self.kappa-im_i*self.rho*self.xi*u)))
+
+        return phi_value
+        
 
